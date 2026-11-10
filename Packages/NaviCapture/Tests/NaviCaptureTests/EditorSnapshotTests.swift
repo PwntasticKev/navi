@@ -54,7 +54,8 @@ struct EditorSnapshotTests {
         let backdrop = try Self.backdrop(size: CGSize(width: screen.width * 2, height: screen.height * 2))
         let area = try #require(Self.areas[place])
         let pixels = CGRect(x: area.minX * 2, y: area.minY * 2, width: area.width * 2, height: area.height * 2)
-        let model = AnnotateModel(base: try #require(backdrop.cropping(to: pixels)), scale: 2)
+        let placement = ScreenPlacement(origin: area.origin, source: pixels, scale: 2)
+        let model = AnnotateModel(base: try #require(backdrop.cropping(to: pixels)), scale: 2, placement: placement)
         model.tool = .arrow
         model.pointerDown(at: CGPoint(x: 140, y: 560))
         model.pointerDragged(from: CGPoint(x: 140, y: 560), to: CGPoint(x: 520, y: 240))

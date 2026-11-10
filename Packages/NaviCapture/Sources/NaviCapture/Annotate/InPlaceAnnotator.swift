@@ -31,7 +31,13 @@ final class InPlaceAnnotator {
         captured: CapturedImage, backdrop: CGImage?, screen: NSScreen, area: CGRect,
         onFinish: @escaping (AnnotateEditor.Result?) -> Void
     ) {
-        model = AnnotateModel(base: captured.image, scale: captured.scale)
+        // The shot is the frozen screen's pixels under the area, so its frame can be changed later.
+        let source = CGRect(
+            x: (area.minX * captured.scale).rounded(), y: (area.minY * captured.scale).rounded(),
+            width: CGFloat(captured.image.width), height: CGFloat(captured.image.height)
+        )
+        let placement = ScreenPlacement(origin: area.origin, source: backdrop == nil ? nil : source, scale: captured.scale)
+        model = AnnotateModel(base: captured.image, scale: captured.scale, placement: placement)
         self.backdrop = backdrop
         self.screen = screen
         self.area = area
@@ -179,16 +185,23 @@ struct InPlaceAnnotateView: View {
     let onDone: () -> Void
     let onCancel: () -> Void
     @State private var toolbarSize = CGSize(width: 900, height: 44)
+    /// See `FrameAdjuster`: 0 at rest, 1 while the pointer is near the frame or dragging it.
+    @State private var reveal: CGFloat = 0
+    @State private var pointer: CGPoint?
+    @State private var isDraggingFrame = false
 
-    private static let dim = Color.black.opacity(0.35)
+    static let space = "InPlaceScreen"
+    private static let dim = Color.black.opacity(0.42)
+    /// How close the pointer must be to the frame line for the brackets to grow.
+    private static let revealDistance: CGFloat = 24
     private static let toolbarGap: CGFloat = 10
     private static let screenMargin: CGFloat = 12
 
     var body: some View {
         GeometryReader { proxy in
-            // Crop, rotate, and resize change the shot's size. The canvas grows or shrinks from
-            // the area's top-left corner.
-            let hole = CGRect(origin: area.origin, size: model.pointSize)
+            // A crop keeps the kept pixels where they are on screen; rotate and resize grow or
+            // shrink the canvas from its top-left corner.
+            let hole = model.placement?.frame(pointSize: model.pointSize) ?? CGRect(origin: area.origin, size: model.pointSize)
             let toolbarOrigin = CaptureGeometry.toolbarOrigin(
                 below: hole, toolbar: toolbarSize, in: proxy.size, gap: Self.toolbarGap, margin: Self.screenMargin
             )
@@ -203,17 +216,48 @@ struct InPlaceAnnotateView: View {
                 AnnotateCanvas(model: model, layout: .actualSize)
                     .frame(width: hole.width, height: hole.height)
                     .offset(x: hole.minX, y: hole.minY)
-                Rectangle()
-                    .stroke(Color.white, lineWidth: 1)
-                    .frame(width: hole.width + 1, height: hole.height + 1)
-                    .offset(x: hole.minX - 0.5, y: hole.minY - 0.5)
-                    .allowsHitTesting(false)
+                frameAdjuster(hole: hole, screen: proxy.size)
                 toolbar
                     .offset(x: toolbarOrigin.x, y: toolbarOrigin.y)
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+            .coordinateSpace(.named(Self.space))
+            .onContinuousHover(coordinateSpace: .named(Self.space)) { phase in
+                if case let .active(point) = phase { pointer = point } else { pointer = nil }
+                updateReveal(hole: hole)
+            }
         }
         .ignoresSafeArea()
+    }
+
+    private func frameAdjuster(hole: CGRect, screen: CGSize) -> some View {
+        FrameAdjuster(
+            frame: hole,
+            pixelSize: model.pixelSize,
+            screenSize: screen,
+            canAdjust: backdrop != nil && model.placement?.canReframe == true,
+            reveal: reveal,
+            onDragging: { dragging in
+                if dragging { model.beginReframe() }
+                isDraggingFrame = dragging
+                updateReveal(hole: hole)
+            },
+            onChange: { frame in
+                if let backdrop { model.reframe(to: frame, screen: backdrop) }
+            }
+        )
+        .frame(width: screen.width, height: screen.height, alignment: .topLeading)
+    }
+
+    /// Grows the brackets while the pointer is near the frame line or a drag is on.
+    private func updateReveal(hole: CGRect) {
+        let near = pointer.map { point in
+            hole.insetBy(dx: -Self.revealDistance, dy: -Self.revealDistance).contains(point)
+                && !hole.insetBy(dx: Self.revealDistance, dy: Self.revealDistance).contains(point)
+        } ?? false
+        let target: CGFloat = isDraggingFrame || near ? 1 : 0
+        guard target != reveal else { return }
+        withAnimation(.easeOut(duration: 0.18)) { reveal = target }
     }
 
     /// Clicks on the dim do nothing, so a stray click cannot lose the marks.

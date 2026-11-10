@@ -21,6 +21,7 @@ final class AnnotateModel {
     struct Snapshot {
         let base: CGImage
         let document: AnnotationDocument
+        let placement: ScreenPlacement?
     }
 
     /// Text that is being typed. `id` is set when an old text mark is being changed.
@@ -32,6 +33,8 @@ final class AnnotateModel {
 
     private(set) var base: CGImage
     private(set) var document: AnnotationDocument
+    /// Edit after capture: where the canvas sits on the frozen screen. Nil in the editor window.
+    private(set) var placement: ScreenPlacement?
     /// Pixels per point of the capture (2 on Retina).
     let scale: CGFloat
     var tool: AnnotationTool = .arrow {
@@ -77,9 +80,10 @@ final class AnnotateModel {
     var pixelSize: CGSize { CGSize(width: base.width, height: base.height) }
     var pointSize: CGSize { CGSize(width: CGFloat(base.width) / scale, height: CGFloat(base.height) / scale) }
 
-    init(base: CGImage, document: AnnotationDocument = AnnotationDocument(), scale: CGFloat) {
+    init(base: CGImage, document: AnnotationDocument = AnnotationDocument(), scale: CGFloat, placement: ScreenPlacement? = nil) {
         self.base = base
         self.document = document
+        self.placement = placement
         self.scale = max(scale, 1)
         render()
     }
@@ -303,6 +307,29 @@ final class AnnotateModel {
         let (transform, _) = edit.transform(for: pixelSize)
         document.apply(transform, scale: edit.markScale)
         base = image
+        placement = placement?.after(edit)
+        render()
+    }
+
+    // MARK: Frame on the screen (edit after capture)
+
+    /// Call once when a drag of the frame starts, so one undo puts the whole drag back.
+    func beginReframe() {
+        commitText()
+        cropRect = nil
+        recordUndo()
+    }
+
+    /// Shows a new piece of the frozen `screen` as the base. `frame` is in screen points. Marks
+    /// stay on the same screen pixels, so they do not move on screen.
+    func reframe(to frame: CGRect, screen: CGImage) {
+        let pixels = CGSize(width: screen.width, height: screen.height)
+        guard let (next, shift) = placement?.reframed(to: frame, screenPixels: pixels),
+              let source = next.source, let image = screen.cropping(to: source)
+        else { return }
+        document.apply(CGAffineTransform(translationX: shift.dx, y: shift.dy))
+        base = image
+        placement = next
         render()
     }
 
@@ -326,12 +353,12 @@ final class AnnotateModel {
 
     func undo() {
         commitText()
-        guard let snapshot = undoStack.undo(current: Snapshot(base: base, document: document)) else { return }
+        guard let snapshot = undoStack.undo(current: Snapshot(base: base, document: document, placement: placement)) else { return }
         restore(snapshot)
     }
 
     func redo() {
-        guard let snapshot = undoStack.redo(current: Snapshot(base: base, document: document)) else { return }
+        guard let snapshot = undoStack.redo(current: Snapshot(base: base, document: document, placement: placement)) else { return }
         restore(snapshot)
     }
 
@@ -375,12 +402,13 @@ final class AnnotateModel {
     }
 
     private func recordUndo() {
-        undoStack.record(Snapshot(base: base, document: document))
+        undoStack.record(Snapshot(base: base, document: document, placement: placement))
     }
 
     private func restore(_ snapshot: Snapshot) {
         base = snapshot.base
         document = snapshot.document
+        placement = snapshot.placement
         selection = nil
         render()
     }
