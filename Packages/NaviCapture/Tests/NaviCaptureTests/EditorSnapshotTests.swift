@@ -82,7 +82,7 @@ struct EditorSnapshotTests {
         }
     }
 
-    private static func backdrop(size: CGSize) throws -> CGImage {
+    static func backdrop(size: CGSize) throws -> CGImage {
         if let path = ProcessInfo.processInfo.environment["NAVI_BACKDROP"],
            let source = CGImageSourceCreateWithURL(URL(filePath: path) as CFURL, nil),
            let image = CGImageSourceCreateImageAtIndex(source, 0, nil) {

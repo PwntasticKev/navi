@@ -184,6 +184,9 @@ struct InPlaceAnnotateView: View {
     let area: CGRect
     let onDone: () -> Void
     let onCancel: () -> Void
+    /// Fixes how far the frame marks are shown, instead of following the pointer. For the
+    /// recorded demo and snapshots, which have no real pointer.
+    var revealOverride: CGFloat?
     @State private var toolbarSize = CGSize(width: 900, height: 44)
     /// See `FrameAdjuster`: 0 at rest, 1 while the pointer is near the frame or dragging it.
     @State private var reveal: CGFloat = 0
@@ -236,7 +239,7 @@ struct InPlaceAnnotateView: View {
             pixelSize: model.pixelSize,
             screenSize: screen,
             canAdjust: backdrop != nil && model.placement?.canReframe == true,
-            reveal: reveal,
+            reveal: revealOverride ?? reveal,
             onDragging: { dragging in
                 if dragging { model.beginReframe() }
                 isDraggingFrame = dragging

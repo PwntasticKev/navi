@@ -61,7 +61,7 @@ struct FrameAdjuster: View {
     }
 
     private var sizeLabel: some View {
-        Text("\(Int(pixelSize.width)) × \(Int(pixelSize.height))")
+        Text(verbatim: "\(Int(pixelSize.width)) × \(Int(pixelSize.height))")
             .font(.system(size: 11, weight: .medium).monospacedDigit())
             .foregroundStyle(.white)
             .padding(.horizontal, 6)
