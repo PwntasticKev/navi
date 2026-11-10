@@ -97,4 +97,26 @@ public enum CaptureGeometry {
             number += 1
         }
     }
+
+    /// True when a press and release are close enough to count as a click, not a drag.
+    public static func isClick(from press: CGPoint, to point: CGPoint, threshold: CGFloat) -> Bool {
+        hypot(point.x - press.x, point.y - press.y) <= threshold
+    }
+
+    /// The rect between `a` (progress 0) and `b` (progress 1). Progress is clamped to 0...1.
+    public static func interpolate(_ a: CGRect, _ b: CGRect, progress: CGFloat) -> CGRect {
+        let t = min(max(progress, 0), 1)
+        return CGRect(
+            x: a.minX + (b.minX - a.minX) * t,
+            y: a.minY + (b.minY - a.minY) * t,
+            width: a.width + (b.width - a.width) * t,
+            height: a.height + (b.height - a.height) * t
+        )
+    }
+
+    /// Cubic ease-out: fast at the start, slow at the end. Input and output are 0...1.
+    public static func easeOut(_ t: CGFloat) -> CGFloat {
+        let clamped = min(max(t, 0), 1)
+        return 1 - pow(1 - clamped, 3)
+    }
 }

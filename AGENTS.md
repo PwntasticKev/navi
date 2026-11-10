@@ -105,6 +105,12 @@ video editor.
   backup from an older run keeps its entries; new IDs are added to it. SIGTERM quits the normal way, so
   `pkill` restores them too. No code runs when the app is deleted, so quitting
   is what gives the keys back. The first launch asks; the menu has a toggle.
+- Area mode (`⇧⌘4`, and the `⇧⌘5` bar in Screenshot or Record) spotlights the
+  window under the cursor: the rest of the screen dims, the window gets a purple
+  ring and glow, and a label shows its app and pixel size. The highlight glides
+  between windows (`WindowHighlight`). A click (under 5 pt of movement) picks
+  that window, the same as Space window mode; a drag selects an area, even
+  inside a window. Capture Text and scrolling capture have no highlight.
 - In the `⇧⌘5` all-in-one bar, a dragged area stays on screen, like macOS:
   drag inside to move it, drag a corner to resize it, then press the bar's
   Capture (or Copy Text, Start Scrolling) button or Return. Picking Record

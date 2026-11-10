@@ -7,10 +7,18 @@ struct CapturedImage {
     let scale: CGFloat
 }
 
-/// One window on screen, for window mode. `frame` is in Cocoa global coordinates.
+/// One window on screen, for window picking. `frame` is in Cocoa global coordinates.
 struct OnScreenWindow {
     let id: CGWindowID
     let frame: CGRect
+    /// The owning app's name and process, for the label on the highlighted window.
+    var appName: String = ""
+    var ownerPID: pid_t = 0
+
+    /// The same window with its frame moved by `offset`.
+    func offsetBy(dx: CGFloat, dy: CGFloat) -> OnScreenWindow {
+        OnScreenWindow(id: id, frame: frame.offsetBy(dx: dx, dy: dy), appName: appName, ownerPID: ownerPID)
+    }
 }
 
 enum CaptureError: Error {
@@ -77,7 +85,12 @@ enum ScreenGrabber {
                   let bounds = CGRect(dictionaryRepresentation: boundsInfo),
                   bounds.width > 20, bounds.height > 20
             else { return nil }
-            return OnScreenWindow(id: number, frame: CaptureGeometry.flip(bounds, primaryHeight: primaryHeight))
+            return OnScreenWindow(
+                id: number,
+                frame: CaptureGeometry.flip(bounds, primaryHeight: primaryHeight),
+                appName: info[kCGWindowOwnerName as String] as? String ?? "",
+                ownerPID: info[kCGWindowOwnerPID as String] as? pid_t ?? 0
+            )
         }
     }
 

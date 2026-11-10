@@ -5,6 +5,8 @@ import Carbon.HIToolbox
 /// screen; the frozen screen images arrive a moment later (`freeze`) and are what gets cropped.
 ///
 /// Area mode: drag a box. Edges snap to window edges. A magnifier shows the pixels under the cursor.
+/// For screenshots and recordings, area mode also spotlights the window under the cursor: a click
+/// (less than `OverlayView.clickSlop` of movement) picks that window, a drag selects an area.
 /// Window mode: hover to highlight a window, click to pick it. Space switches modes. Esc cancels.
 @MainActor
 final class SelectionSession {
@@ -135,10 +137,10 @@ final class SelectionSession {
             return "Return to \(verb)  ·  Drag inside to move, corners to resize  ·  Esc to cancel"
         }
         let action = switch purpose {
-        case .screenshot: mode == .area ? "Drag to capture" : "Click a window"
+        case .screenshot: mode == .area ? "Click a window or drag an area" : "Click a window"
         case .text: "Drag over text to copy it"
         case .scroll: "Drag over the area to scroll"
-        case .record: mode == .area ? "Drag the area to record" : "Click a window to record"
+        case .record: mode == .area ? "Click a window or drag an area to record" : "Click a window to record"
         }
         let space = purpose == .text || purpose == .scroll ? "" : (mode == .area ? "  ·  Space for window" : "  ·  Space for area")
         return action + space + "  ·  Esc to cancel"
@@ -206,6 +208,12 @@ final class OverlayView: NSView {
     private var mouse: CGPoint?
     private var dragStart: CGPoint?
     private var dragCurrent: CGPoint?
+    /// Where the mouse went down for a new area, and whether it has since moved past `clickSlop`.
+    private var pressPoint: CGPoint?
+    private var dragBegan = false
+    /// Movement under this many points is a click on the highlighted window, not a drag.
+    static let clickSlop: CGFloat = 5
+    private let highlight = WindowHighlight()
 
     private static let dim = NSColor.black.withAlphaComponent(0.35)
 
@@ -244,6 +252,7 @@ final class OverlayView: NSView {
         self.session = session
         self.screen = screen
         super.init(frame: CGRect(origin: .zero, size: screen.frame.size))
+        highlight.onChange = { [weak self] in self?.needsDisplay = true }
     }
 
     @available(*, unavailable)
@@ -271,8 +280,11 @@ final class OverlayView: NSView {
     func resetDrag() {
         dragStart = nil
         dragCurrent = nil
+        pressPoint = nil
+        dragBegan = false
         isHolding = false
         moveStart = nil
+        updateHighlight()
         needsDisplay = true
     }
 
@@ -303,6 +315,7 @@ final class OverlayView: NSView {
 
     override func mouseExited(with event: NSEvent) {
         mouse = nil
+        updateHighlight()
         needsDisplay = true
     }
 
@@ -310,7 +323,30 @@ final class OverlayView: NSView {
         let point = location(of: event)
         mouse = point
         cursor(at: point).set()
+        updateHighlight()
         needsDisplay = true
+    }
+
+    /// Area mode spotlights the window under the cursor for screenshots and recordings, until an
+    /// area drag begins or an area is held.
+    private var picksHoveredWindow: Bool {
+        guard mode == .area, !isHolding, moveStart == nil else { return false }
+        return session?.purpose == .screenshot || session?.purpose == .record
+    }
+
+    /// The window a click would pick now.
+    private var clickTarget: OnScreenWindow? {
+        guard picksHoveredWindow, !dragBegan, let point = pressPoint ?? mouse else { return nil }
+        return hoveredWindow(at: point)
+    }
+
+    private func updateHighlight() {
+        if dragBegan || !picksHoveredWindow {
+            if highlight.window != nil { highlight.hideNow() }
+            return
+        }
+        let target = clickTarget
+        highlight.show(target, rect: target.map { $0.frame.intersection(bounds) })
     }
 
     private func cursor(at point: CGPoint) -> NSCursor {
@@ -344,8 +380,11 @@ final class OverlayView: NSView {
                 session?.holdChanged(nil)
                 isHolding = false
             }
+            pressPoint = point
+            dragBegan = false
             dragStart = snapped(point)
             dragCurrent = dragStart
+            updateHighlight()
             needsDisplay = true
         }
     }
@@ -363,11 +402,27 @@ final class OverlayView: NSView {
             needsDisplay = true
             return
         }
+        if let pressPoint, !dragBegan, !CaptureGeometry.isClick(from: pressPoint, to: point, threshold: Self.clickSlop) {
+            dragBegan = true
+            updateHighlight()
+        }
         dragCurrent = snapped(point)
         needsDisplay = true
     }
 
     override func mouseUp(with event: NSEvent) {
+        if mode == .area, pressPoint != nil, !dragBegan, picksHoveredWindow {
+            // A click, not a drag: capture the highlighted window, or nothing on the desktop.
+            let target = clickTarget
+            resetDrag()
+            if let target {
+                highlight.hideNow()
+                session?.finish(.window(target.id, screen))
+            } else if session?.holdsSelection == true, session?.purpose != .record {
+                session?.holdChanged(nil)
+            }
+            return
+        }
         guard mode == .area, let selection else { return }
         moveStart = nil
         guard selection.width >= 2, selection.height >= 2 else {
@@ -411,12 +466,16 @@ final class OverlayView: NSView {
         return CaptureGeometry.rect(from: dragStart, to: dragCurrent)
     }
 
+    /// The area to draw. Hidden while a press on a window may still be a click.
+    private var visibleSelection: CGRect? {
+        if picksHoveredWindow, !dragBegan { return nil }
+        return selection
+    }
+
     /// App window frames in this view's coordinates, front to back.
     private var localWindows: [OnScreenWindow] {
         let origin = screen.frame.origin
-        return (session?.windows ?? []).map {
-            OnScreenWindow(id: $0.id, frame: $0.frame.offsetBy(dx: -origin.x, dy: -origin.y))
-        }
+        return (session?.windows ?? []).map { $0.offsetBy(dx: -origin.x, dy: -origin.y) }
     }
 
     private func hoveredWindow(at point: CGPoint) -> OnScreenWindow? {
@@ -441,20 +500,26 @@ final class OverlayView: NSView {
         if let captured { context.draw(captured.image, in: bounds) }
 
         let hole: CGRect? = switch mode {
-        case .area: selection
+        case .area: visibleSelection
         case .window: mouse.flatMap { hoveredWindow(at: $0)?.frame }
         }
 
-        context.saveGState()
-        context.setFillColor(Self.dim.cgColor)
-        context.addRect(bounds)
-        if let hole { context.addRect(hole) }
-        context.fillPath(using: .evenOdd)
-        context.restoreGState()
+        if hole == nil, picksHoveredWindow, !dragBegan, highlight.frame != nil {
+            highlight.drawDim(in: context, bounds: bounds, color: Self.dim)
+            highlight.drawRing(in: context)
+            highlight.drawLabel(in: bounds, scale: imageSize.width / max(bounds.width, 1))
+        } else {
+            context.saveGState()
+            context.setFillColor(Self.dim.cgColor)
+            context.addRect(bounds)
+            if let hole { context.addRect(hole) }
+            context.fillPath(using: .evenOdd)
+            context.restoreGState()
+        }
 
         switch mode {
         case .area:
-            if let selection {
+            if let selection = visibleSelection {
                 context.setStrokeColor(NSColor.white.cgColor)
                 context.setLineWidth(1)
                 context.stroke(selection.insetBy(dx: -0.5, dy: -0.5))
