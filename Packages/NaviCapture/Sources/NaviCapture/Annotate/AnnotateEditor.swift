@@ -105,6 +105,14 @@ struct AnnotateView: View {
     let onDone: () -> Void
     let onCancel: () -> Void
     @FocusState private var isTyping: Bool
+    @State private var tips: TooltipCenter
+
+    init(model: AnnotateModel, tips: TooltipCenter = TooltipCenter(), onDone: @escaping () -> Void, onCancel: @escaping () -> Void) {
+        self.model = model
+        _tips = State(initialValue: tips)
+        self.onDone = onDone
+        self.onCancel = onCancel
+    }
 
     private static let drawingTools: [AnnotationTool] = [
         .select, .arrow, .rectangle, .filledRectangle, .ellipse, .line, .pencil, .highlighter, .text, .counter,
@@ -119,6 +127,7 @@ struct AnnotateView: View {
         }
         .frame(minWidth: 760, minHeight: 360)
         .background(Color(nsColor: .windowBackgroundColor))
+        .tooltipLayer(tips)
     }
 
     // MARK: Toolbar
@@ -171,12 +180,14 @@ struct AnnotateView: View {
     private var styleGroup: some View {
         ToolGroup {
             ColorWell(model: model)
+                .tooltip(Tip(title: "Color"))
             ForEach(StrokeSize.allCases, id: \.self) { size in
-                IconButton(isOn: model.strokeSize == size, style: .subtle, help: "Line: \(size.title)") {
+                IconButton(isOn: model.strokeSize == size, style: .subtle) {
                     model.strokeSize = size
                 } label: {
                     Capsule().frame(width: 14, height: size.previewHeight)
                 }
+                .tooltip(Tip(title: "\(size.title) line"))
             }
             Menu {
                 Button("Rotate Left") { model.apply(.rotateCounterclockwise) }
@@ -193,16 +204,18 @@ struct AnnotateView: View {
             .menuStyle(.button)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("Rotate, flip, resize")
+            .tooltip(Tip(title: "Rotate, flip, resize"))
         }
     }
 
     private var historyGroup: some View {
         ToolGroup {
-            IconButton(help: "Undo (⌘Z)", action: model.undo) { Image(systemName: "arrow.uturn.backward") }
+            IconButton(action: model.undo) { Image(systemName: "arrow.uturn.backward") }
                 .disabled(!model.canUndo)
-            IconButton(help: "Redo (⇧⌘Z)", action: model.redo) { Image(systemName: "arrow.uturn.forward") }
+                .tooltip(Tip(title: "Undo", shortcut: "⌘Z"))
+            IconButton(action: model.redo) { Image(systemName: "arrow.uturn.forward") }
                 .disabled(!model.canRedo)
+                .tooltip(Tip(title: "Redo", shortcut: "⇧⌘Z"))
         }
     }
 
@@ -220,9 +233,11 @@ struct AnnotateView: View {
     }
 
     private func toolButton(_ tool: AnnotationTool) -> some View {
-        IconButton(isOn: model.tool == tool, help: tool.helpWithShortcut) { model.tool = tool } label: {
+        IconButton(isOn: model.tool == tool) { model.tool = tool } label: {
             Image(systemName: tool.symbol)
         }
+        .tooltip(Tip(title: tool.title, shortcut: tool.shortcut.uppercased()))
+        .accessibilityHint(tool.help)
     }
 
     /// A small picture of the marked-up shot. Drag it into any app to drop the image there.
@@ -253,7 +268,7 @@ struct AnnotateView: View {
                 provider.suggestedName = url.deletingPathExtension().lastPathComponent
                 return provider
             }
-            .help("Drag into any app")
+            .tooltip(Tip(title: "Drag into any app"))
     }
 
     private var colorBinding: Binding<Color> {
@@ -421,7 +436,6 @@ private struct IconButton<Label: View>: View {
 
     var isOn = false
     var style = Style.accent
-    let help: String
     let action: () -> Void
     @ViewBuilder var label: Label
     @Environment(\.isEnabled) private var isEnabled
@@ -437,7 +451,6 @@ private struct IconButton<Label: View>: View {
                 .contentShape(Rectangle())
         }
         .onHover { isHovered = $0 }
-        .help(help)
     }
 
     private var foreground: Color {
@@ -476,7 +489,6 @@ private struct ColorWell: View {
                 .frame(width: 28, height: 26)
                 .contentShape(Rectangle())
         }
-        .help("Color")
         .popover(isPresented: $isOpen, arrowEdge: .bottom) { palette }
     }
 
