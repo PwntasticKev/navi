@@ -38,6 +38,32 @@ struct EditorSnapshotTests {
         }
     }
 
+    /// The text tool just picked: the box is open with no click, and the first letters are in.
+    @Test func textToolOpensABox() throws {
+        let folder = URL(filePath: ProcessInfo.processInfo.environment["NAVI_SNAPSHOTS"]!)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let context = CGContext(
+            data: nil, width: 1200, height: 700, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        context.setFillColor(CGColor(srgbRed: 0.35, green: 0.55, blue: 0.85, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 1200, height: 700))
+        let model = AnnotateModel(base: context.makeImage()!, scale: 2)
+        for (step, text) in [("open", ""), ("typed", "Typed with no click")] {
+            model.tool = .select
+            model.tool = .text
+            model.textEdit?.text = text
+            let view = NSHostingView(rootView: AnnotateView(model: model, onDone: {}, onCancel: {}))
+            view.appearance = NSAppearance(named: .darkAqua)
+            view.frame = CGRect(x: 0, y: 0, width: 1000, height: 420)
+            view.layoutSubtreeIfNeeded()
+            let rep = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+            view.cacheDisplay(in: view.bounds, to: rep)
+            let png = try #require(rep.representation(using: .png, properties: [:]))
+            try png.write(to: folder.appending(path: "text-tool-\(step).png"))
+        }
+    }
+
     /// Edit after capture over a 1440 × 900 screen. NAVI_BACKDROP may name a screenshot to use as
     /// the frozen screen; otherwise a plain gradient stands in for it.
     /// Areas that put the toolbar below, above (near the bottom), and inside (whole screen).
