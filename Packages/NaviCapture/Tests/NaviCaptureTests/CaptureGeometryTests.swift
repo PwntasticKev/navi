@@ -24,7 +24,32 @@ import Testing
             viewSize: CGSize(width: 100, height: 50),
             imageSize: CGSize(width: 200, height: 100)
         )
-        #expect(rect == CGRect(x: 0, y: 80, width: 20, height: 20))
+        // The bottom edge sits on the image edge, so only the right side gains the pixel under the corner.
+        #expect(rect == CGRect(x: 0, y: 80, width: 21, height: 20))
+    }
+
+    @Test func pixelRectHoldsThePixelsUnderBothCorners() {
+        let viewSize = CGSize(width: 100, height: 50)
+        let imageSize = CGSize(width: 200, height: 100)
+        let start = CGPoint(x: 10.5, y: 40)
+        let end = CGPoint(x: 30, y: 20.25)
+        let rect = CaptureGeometry.pixelRect(
+            forSelection: CaptureGeometry.rect(from: start, to: end), viewSize: viewSize, imageSize: imageSize
+        )
+        for corner in [start, end] {
+            let pixel = CaptureGeometry.pixel(at: corner, viewSize: viewSize, imageSize: imageSize)
+            #expect(rect.contains(CGPoint(x: CGFloat(pixel.x) + 0.5, y: CGFloat(pixel.y) + 0.5)))
+        }
+        #expect(rect == CGRect(x: 21, y: 20, width: 40, height: 40))
+    }
+
+    @Test func viewRectIsWherePixelsShow() {
+        let rect = CaptureGeometry.viewRect(
+            forPixels: CGRect(x: 21, y: 20, width: 40, height: 40),
+            viewSize: CGSize(width: 100, height: 50),
+            imageSize: CGSize(width: 200, height: 100)
+        )
+        #expect(rect == CGRect(x: 10.5, y: 20, width: 20, height: 20))
     }
 
     @Test func pixelRectStaysInsideTheImage() {
@@ -48,6 +73,31 @@ import Testing
         #expect(CaptureGeometry.snap(103, to: [100, 105], tolerance: 6) == 105)
         #expect(CaptureGeometry.snap(103, to: [100, 200], tolerance: 6) == 100)
         #expect(CaptureGeometry.snap(120, to: [100, 200], tolerance: 6) == 120)
+    }
+
+    @Test func snapPointUsesVisibleWindowEdges() {
+        let bounds = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let window = CGRect(x: 100, y: 100, width: 400, height: 300)
+        let snapped = CaptureGeometry.snap(CGPoint(x: 103, y: 397), toWindows: [window], bounds: bounds, tolerance: 6)
+        #expect(snapped == CGPoint(x: 100, y: 400))
+    }
+
+    @Test func snapPointIgnoresEdgesFarAlongTheLine() {
+        // The window's left edge line passes x = 100, but the point is far above the window.
+        let bounds = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let window = CGRect(x: 100, y: 100, width: 400, height: 300)
+        let point = CGPoint(x: 103, y: 700)
+        #expect(CaptureGeometry.snap(point, toWindows: [window], bounds: bounds, tolerance: 6) == point)
+    }
+
+    @Test func snapPointIgnoresEdgesHiddenBehindAFrontWindow() {
+        let bounds = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let front = CGRect(x: 50, y: 50, width: 600, height: 600)
+        let behind = CGRect(x: 200, y: 200, width: 100, height: 100)
+        let point = CGPoint(x: 203, y: 250)
+        #expect(CaptureGeometry.snap(point, toWindows: [front, behind], bounds: bounds, tolerance: 6) == point)
+        // With the windows the other way round, the small window's edge is in front and counts.
+        #expect(CaptureGeometry.snap(point, toWindows: [behind, front], bounds: bounds, tolerance: 6) == CGPoint(x: 200, y: 250))
     }
 
     @Test func fileNameUsesTheCleanShotStyle() throws {

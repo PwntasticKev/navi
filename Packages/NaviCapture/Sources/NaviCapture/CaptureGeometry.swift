@@ -39,18 +39,31 @@ public enum CaptureGeometry {
     }
 
     /// The pixel rect in a screen image for a selection in view-local points.
-    /// The result is whole pixels and stays inside the image.
+    /// The pixels under both corners are inside it, the same pixels `pixel(at:)` shows in the
+    /// magnifier, so what you point at is what you get. The result is whole pixels inside the image.
     public static func pixelRect(forSelection selection: CGRect, viewSize: CGSize, imageSize: CGSize) -> CGRect {
         guard viewSize.width > 0, viewSize.height > 0 else { return .zero }
         let sx = imageSize.width / viewSize.width
         let sy = imageSize.height / viewSize.height
-        let rect = CGRect(
-            x: selection.minX * sx,
-            y: (viewSize.height - selection.maxY) * sy,
-            width: selection.width * sx,
-            height: selection.height * sy
-        ).integral
+        let left = (selection.minX * sx).rounded(.down)
+        let right = (selection.maxX * sx).rounded(.down) + 1
+        let top = ((viewSize.height - selection.maxY) * sy).rounded(.down)
+        let bottom = ((viewSize.height - selection.minY) * sy).rounded(.down) + 1
+        let rect = CGRect(x: left, y: top, width: right - left, height: bottom - top)
         return rect.intersection(CGRect(origin: .zero, size: imageSize))
+    }
+
+    /// The view-local points that `pixels` (from `pixelRect`) cover, to draw the selection as it will be cropped.
+    public static func viewRect(forPixels pixels: CGRect, viewSize: CGSize, imageSize: CGSize) -> CGRect {
+        guard imageSize.width > 0, imageSize.height > 0 else { return .zero }
+        let sx = viewSize.width / imageSize.width
+        let sy = viewSize.height / imageSize.height
+        return CGRect(
+            x: pixels.minX * sx,
+            y: viewSize.height - pixels.maxY * sy,
+            width: pixels.width * sx,
+            height: pixels.height * sy
+        )
     }
 
     /// The pixel under a view-local point, in image pixels.
@@ -73,6 +86,31 @@ public enum CaptureGeometry {
             }
         }
         return best
+    }
+
+    /// Snaps `point` to the screen edges and to window edges you can see at it.
+    /// `windows` are frames front to back. A window edge counts only where it runs past the point
+    /// (within `tolerance`) and no window in front of it covers it there, so the hidden edges of
+    /// windows behind others never pull the selection away from what the magnifier shows.
+    public static func snap(_ point: CGPoint, toWindows windows: [CGRect], bounds: CGRect, tolerance: CGFloat) -> CGPoint {
+        func covered(_ edgePoint: CGPoint, before index: Int) -> Bool {
+            windows[..<index].contains { front in
+                front.minX < edgePoint.x && edgePoint.x < front.maxX && front.minY < edgePoint.y && edgePoint.y < front.maxY
+            }
+        }
+        var xs: [CGFloat] = [bounds.minX, bounds.maxX]
+        var ys: [CGFloat] = [bounds.minY, bounds.maxY]
+        for (index, frame) in windows.enumerated() {
+            if frame.minY - tolerance <= point.y, point.y <= frame.maxY + tolerance {
+                let y = min(max(point.y, frame.minY), frame.maxY)
+                xs += [frame.minX, frame.maxX].filter { !covered(CGPoint(x: $0, y: y), before: index) }
+            }
+            if frame.minX - tolerance <= point.x, point.x <= frame.maxX + tolerance {
+                let x = min(max(point.x, frame.minX), frame.maxX)
+                ys += [frame.minY, frame.maxY].filter { !covered(CGPoint(x: x, y: $0), before: index) }
+            }
+        }
+        return CGPoint(x: snap(point.x, to: xs, tolerance: tolerance), y: snap(point.y, to: ys, tolerance: tolerance))
     }
 
     /// The file name for a capture, for example `Navi 2026-11-06 at 16.10.12.png`.
