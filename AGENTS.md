@@ -154,7 +154,10 @@ video editor.
   with the toolbar floating below it (above it near the bottom, inside it when
   it fills the screen). No window or title bar. Return or Copy copies the
   marked-up shot, adds it to the history with its marks, and shows "Copied";
-  no corner card. Esc or Cancel drops the shot. While typing text or cropping,
+  no corner card. Save (`⌘S`) writes it to the save folder and shows "Saved".
+  Stash only keeps it in the history and shows "Stashed". Both add it to the
+  history and do not copy. Esc or Cancel drops the shot, with no close animation (the
+  selection overlay's Esc too). While typing text or cropping,
   Return and Esc end that first. Every editor key (tool letters, `⌘Z`, Delete)
   works. The window editor and this one share `AnnotateToolbar`,
   `AnnotateCanvas`, and `AnnotateKeys`.

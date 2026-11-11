@@ -66,7 +66,7 @@ struct EditorSnapshotTests {
 
         for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
             let view = NSHostingView(rootView: InPlaceAnnotateView(
-                model: model, backdrop: backdrop, area: area, onDone: {}, onCancel: {}
+                model: model, backdrop: backdrop, area: area, onDone: {}, onSave: {}, onStash: {}, onCancel: {}
             ))
             view.appearance = NSAppearance(named: appearance)
             view.frame = CGRect(origin: .zero, size: screen)
