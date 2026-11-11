@@ -77,6 +77,26 @@ import Testing
         #expect(CaptureGeometry.oppositeCorner(of: rect, near: CGPoint(x: 25, y: 20), tolerance: 8) == nil)
     }
 
+    @Test func smallMovementIsAClick() {
+        let press = CGPoint(x: 100, y: 100)
+        #expect(CaptureGeometry.isClick(from: press, to: CGPoint(x: 103, y: 104), threshold: 5))
+        #expect(!CaptureGeometry.isClick(from: press, to: CGPoint(x: 104, y: 104), threshold: 5))
+    }
+
+    @Test func interpolateMovesBetweenRectsAndClamps() {
+        let a = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let b = CGRect(x: 100, y: 50, width: 300, height: 200)
+        #expect(CaptureGeometry.interpolate(a, b, progress: 0.5) == CGRect(x: 50, y: 25, width: 200, height: 150))
+        #expect(CaptureGeometry.interpolate(a, b, progress: -1) == a)
+        #expect(CaptureGeometry.interpolate(a, b, progress: 2) == b)
+    }
+
+    @Test func easeOutStartsFastAndEndsAtOne() {
+        #expect(CaptureGeometry.easeOut(0) == 0)
+        #expect(CaptureGeometry.easeOut(1) == 1)
+        #expect(CaptureGeometry.easeOut(0.5) > 0.5)
+    }
+
     // Edit after capture: where the toolbar goes, in top-left coordinates.
     private static let screen = CGSize(width: 1000, height: 800)
     private static let bar = CGSize(width: 400, height: 40)
