@@ -15,6 +15,8 @@ final class PillModel {
 
     var phase: Phase = .listening
     var isLocked = false
+    /// The words heard so far (live text). Empty until the engine reports some.
+    var liveText = ""
     /// Newest level last. Each value is 0...1.
     var levels: [Float] = Array(repeating: 0, count: PillModel.barCount)
 
@@ -26,54 +28,97 @@ final class PillModel {
     func reset() {
         phase = .listening
         isLocked = false
+        liveText = ""
         levels = Array(repeating: 0, count: Self.barCount)
     }
 }
 
-private struct PillView: View {
-    static let panelSize = NSSize(width: 240, height: 60)
+struct PillView: View {
+    /// Room for the pill to grow up by one line of words. The panel is clear and ignores the mouse,
+    /// so the empty part covers nothing.
+    static let panelSize = NSSize(width: 240, height: 80)
+    /// The pill's bottom edge, from the panel's bottom. The one-line pill sits where it always has.
+    static let bottomInset: CGFloat = 13
+    static let spacing: CGFloat = 8
     let model: PillModel
 
+    /// Words show only while listening, once the engine has heard some.
+    private var showsWords: Bool { model.phase == .listening && !model.liveText.isEmpty }
+
     var body: some View {
-        HStack(spacing: 8) {
-            switch model.phase {
-            case .listening:
-                if model.isLocked {
-                    Image(systemName: "lock.fill")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.8))
+        VStack(spacing: 4) {
+            if showsWords {
+                LiveTextLine(text: model.liveText, width: rowWidth)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+            HStack(spacing: Self.spacing) {
+                switch model.phase {
+                case .listening:
+                    Waveform(levels: model.levels, compact: showsWords)
+                case .thinking:
+                    ProgressView()
+                        .controlSize(.small)
+                        .colorScheme(.dark)
+                    Text("Thinking…")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.85))
                 }
-                Waveform(levels: model.levels)
-            case .thinking:
-                ProgressView()
-                    .controlSize(.small)
-                    .colorScheme(.dark)
-                Text("Thinking…")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.85))
             }
         }
         .padding(.horizontal, 14)
-        .frame(height: 34)
-        .background(Capsule().fill(.black.opacity(0.88)))
-        .overlay(Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
+        .padding(.vertical, showsWords ? 7 : 6)
+        .frame(minHeight: 34)
+        .background(RoundedRectangle(cornerRadius: 17, style: .continuous).fill(.black.opacity(0.88)))
+        .overlay(RoundedRectangle(cornerRadius: 17, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.3), radius: 6, y: 2)
-        .frame(width: PillView.panelSize.width, height: PillView.panelSize.height)
+        .animation(.easeOut(duration: 0.18), value: showsWords)
+        .padding(.bottom, Self.bottomInset)
+        .frame(width: Self.panelSize.width, height: Self.panelSize.height, alignment: .bottom)
+    }
+
+    /// The width of the bars row, so the words never make the pill wider than it was.
+    private var rowWidth: CGFloat { Waveform.width }
+}
+
+/// One line of the words heard so far, as wide as the bars below it. The newest words stay in view;
+/// the oldest are cut at the start ("…").
+private struct LiveTextLine: View {
+    let text: String
+    let width: CGFloat
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.white.opacity(0.92))
+            .lineLimit(1)
+            .truncationMode(.head)
+            .frame(width: width, alignment: .center)
     }
 }
 
 private struct Waveform: View {
+    static let barWidth: CGFloat = 3
+    static let barSpacing: CGFloat = 2
+    static let width = CGFloat(PillModel.barCount) * barWidth + CGFloat(PillModel.barCount - 1) * barSpacing
+    /// Under the words: fewer, thinner, shorter bars (the newest ones), centered.
+    static let compactBarCount = 12
+    static let compactBarWidth: CGFloat = 2
+    static let compactHeight: CGFloat = 8
     let levels: [Float]
+    let compact: Bool
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(Array(levels.enumerated()), id: \.offset) { _, level in
+        let shown = compact ? Array(levels.suffix(Self.compactBarCount)) : levels
+        let height = compact ? Self.compactHeight : 22
+        let barWidth = compact ? Self.compactBarWidth : Self.barWidth
+        HStack(spacing: Self.barSpacing) {
+            ForEach(Array(shown.enumerated()), id: \.offset) { _, level in
                 Capsule()
-                    .fill(.white)
-                    .frame(width: 3, height: 3 + CGFloat(level) * 19)
+                    .fill(.white.opacity(compact ? 0.7 : 1))
+                    .frame(width: barWidth, height: 2 + CGFloat(level) * (height - 2))
             }
         }
-        .frame(height: 22)
+        .frame(height: height)
         .animation(.linear(duration: 0.05), value: levels)
         .accessibilityHidden(true)
     }

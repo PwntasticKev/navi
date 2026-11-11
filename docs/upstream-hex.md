@@ -29,9 +29,9 @@ features into `Packages/NaviDictation` and checks them with the benchmark.
 | Order of steps | Spoken formatting, spoken symbols, fillers, replacements, mode corrections, OpenCode rewrite, transforms | Fillers (rules), then Apple's model |
 | Vocabulary | Vocabulary biasing for Parakeet (`docs/features/vocabulary.md`, Labs) | None |
 | Spoken punctuation, formatting | Labs, Output group (`docs/features/labs.md`) | None |
-| Live text | Words beside the HUD while you talk (Labs) | None |
+| Live text | Words beside the HUD while you talk (Labs) | "Show Words While Talking" (on by default): one line in the pill, newest words in view. Parakeet previews the newest 10 s every 0.6 s; Apple speech reports partial results (`LiveText.swift`) |
 | Microphone | Keep ready (stream open, 450 ms pre-roll) or Release when idle; 200 ms release tail (`docs/features/dictation.md`, Warm And Cold Capture) | "Keep Microphone Ready" (off by default; then the mic is set up but off until the press, like Wispr Flow), 450 ms pre-roll, 200 ms tail; input-only AUHAL unit, like Hex's cpal stream, so output audio is never touched (`AudioCapture.swift`) |
-| Shortcut | Option by default. Hold, toggle, double-tap; Fn/Globe, keys, mouse buttons | Hold fn, double-tap fn to lock |
+| Shortcut | Option by default. Hold, toggle, double-tap; Fn/Globe, keys, mouse buttons | Hold fn, double-tap fn to lock, or "Tap fn to Start and Stop" (toggle) |
 | Meetings | Call detection, recording, transcripts, chapters, notes | None |
 | CLI | `hex dictation start/stop/toggle`, `hex paste-last`, transcript CLI | None |
 

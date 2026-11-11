@@ -21,6 +21,12 @@ final class FnKeyMonitor {
     var isRunning: Bool { globalMonitor != nil }
     var isLocked: Bool { gesture.isLocked }
 
+    /// One tap locks, the next press ends it (see `FnGesture.tapToggles`).
+    var tapToggles: Bool {
+        get { gesture.tapToggles }
+        set { gesture.tapToggles = newValue }
+    }
+
     func start() {
         guard globalMonitor == nil else { return }
         let others: NSEvent.ModifierFlags = [.command, .option, .control, .shift]

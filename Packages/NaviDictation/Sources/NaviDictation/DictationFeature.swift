@@ -3,7 +3,8 @@ import NaviCore
 import os
 
 /// Talk to type. Hold fn (Globe) to talk; release to type the text at the cursor in the front app.
-/// Double-tap fn to lock hands-free mode; one fn tap ends it.
+/// Double-tap fn to lock hands-free mode; one fn tap ends it. With "tap to toggle" on, one tap locks
+/// and the next press ends it. While listening, the pill can show the words heard so far.
 ///
 /// While listening, a small pill with a live waveform shows at the bottom of the screen with the mouse.
 /// Speech runs on the Mac (`SpeechAnalyzer` on macOS 26 and newer, `SFSpeechRecognizer` before that).
@@ -27,6 +28,8 @@ import os
 public final class DictationFeature {
     private static let enabledKey = "dictation.enabled"
     private static let keepReadyKey = "dictation.keepMicrophoneReady"
+    private static let tapTogglesKey = "dictation.tapToToggle"
+    private static let liveTextKey = "dictation.liveText"
     nonisolated private static let logger = Logger(subsystem: "com.donovanhiland.navi", category: "Dictation")
 
     private let inbox: Inbox
@@ -63,6 +66,23 @@ public final class DictationFeature {
             UserDefaults.standard.set(newValue, forKey: Self.keepReadyKey)
             updateMicrophone()
         }
+    }
+
+    /// One fn tap starts hands-free listening and the next press types the text, instead of a double
+    /// tap. Holding fn still works as push to talk. Saved; starts as `false`.
+    public var tapToggles: Bool {
+        get { UserDefaults.standard.object(forKey: Self.tapTogglesKey) as? Bool ?? false }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Self.tapTogglesKey)
+            monitor?.tapToggles = newValue
+        }
+    }
+
+    /// The pill shows the words heard so far while the user talks, newest words always in view.
+    /// Only shown: the typed text comes from the full pass after the user stops. Saved; starts as `true`.
+    public var showsLiveText: Bool {
+        get { UserDefaults.standard.object(forKey: Self.liveTextKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: Self.liveTextKey) }
     }
 
     /// False until the user turns talk to type on or off for the first time.
@@ -140,6 +160,7 @@ public final class DictationFeature {
         if monitor == nil {
             monitor = FnKeyMonitor { [weak self] action in self?.handle(action) }
         }
+        monitor?.tapToggles = tapToggles
         monitor?.start()
     }
 
@@ -162,7 +183,7 @@ public final class DictationFeature {
 
     /// One run of listening: the mic, the audio stream, and the speech task.
     private struct Session {
-        let id = UUID()
+        let id: UUID
         let transcription: Task<String, any Error>
         let pressedAt: ContinuousClock.Instant
         let sourceApp: String?
@@ -189,14 +210,21 @@ public final class DictationFeature {
         startLevelTimer()
         TextCleaner.prewarm()
 
+        let id = UUID()
         let (stream, continuation) = AsyncStream<AudioChunk>.makeStream()
+        var onPartial: PartialHandler?
+        if showsLiveText {
+            onPartial = { [weak self] text in
+                Task { @MainActor in self?.showLiveText(text, for: id) }
+            }
+        }
         let transcription = Task.detached { () -> String in
             let engine = await SpeechEngines.best()
-            return try await engine.transcribe(audio: stream)
+            return try await engine.transcribe(audio: stream, onPartial: onPartial)
         }
         let app = NSWorkspace.shared.frontmostApplication
         let session = Session(
-            transcription: transcription, pressedAt: .now,
+            id: id, transcription: transcription, pressedAt: .now,
             sourceApp: app?.localizedName, sourceBundleID: app?.bundleIdentifier
         )
         self.session = session
@@ -230,6 +258,12 @@ public final class DictationFeature {
                 Self.logger.info("Microphone ready \((ContinuousClock.now - session.pressedAt).milliseconds) ms after the press")
             }
         }
+    }
+
+    /// Shows the words heard so far, if they belong to the session still listening.
+    private func showLiveText(_ text: String, for id: UUID) {
+        guard session?.id == id else { return }
+        pill.model.liveText = text
     }
 
     private func lock() {

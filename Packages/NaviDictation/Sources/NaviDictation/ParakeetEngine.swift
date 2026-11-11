@@ -26,6 +26,9 @@ actor ParakeetModel {
     private static let logger = Logger(subsystem: "com.donovanhiland.navi", category: "Parakeet")
     private var manager: AsrManager?
     private var loading: Task<AsrManager, any Error>?
+    /// One transcription at a time: `AsrManager` awaits inside a run, so calls could interleave.
+    private var isBusy = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
 
     /// True when the model files are on disk. Loading them still takes a moment.
     nonisolated static var isDownloaded: Bool {
@@ -59,27 +62,101 @@ actor ParakeetModel {
         }
     }
 
-    /// Transcribes 16 kHz mono samples.
+    /// Transcribes 16 kHz mono samples. Waits for a run in progress to finish first.
     func transcribe(_ samples: [Float]) async throws -> String {
         let manager = try await prepare()
+        await takeTurn()
+        defer { endTurn() }
+        return try await run(samples, on: manager)
+    }
+
+    /// A live text preview: skipped (nil) when the model is not loaded or is busy, so a preview never
+    /// delays the final text.
+    func preview(_ samples: [Float]) async -> String? {
+        guard let manager, !isBusy else { return nil }
+        isBusy = true
+        defer { endTurn() }
+        return try? await run(samples, on: manager)
+    }
+
+    private func run(_ samples: [Float], on manager: AsrManager) async throws -> String {
         let layers = await manager.decoderLayerCount
         var state = TdtDecoderState.make(decoderLayers: layers)
         let result = try await manager.transcribe(samples, decoderState: &state)
         return result.text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    private func takeTurn() async {
+        guard isBusy else {
+            isBusy = true
+            return
+        }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+
+    /// Hands the turn to the next caller in line, or frees it.
+    private func endTurn() {
+        if waiting.isEmpty {
+            isBusy = false
+        } else {
+            waiting.removeFirst().resume()
+        }
+    }
+}
+
+/// The mic buffers of one dictation, shared between the reader and the live text preview.
+private final class BufferStore: @unchecked Sendable {
+    private let buffers = OSAllocatedUnfairLock(uncheckedState: [AVAudioPCMBuffer]())
+
+    func append(_ buffer: AVAudioPCMBuffer) {
+        buffers.withLock { $0.append(buffer) }
+    }
+
+    var all: [AVAudioPCMBuffer] { buffers.withLock { $0 } }
 }
 
 /// A `SpeechEngine` that collects the whole utterance, then runs Parakeet once, like Hex.
+///
+/// For live text, Parakeet also reads the newest few seconds again every `LiveText.previewInterval`
+/// while the user talks. The text that gets typed still comes from the one pass over everything.
 struct ParakeetEngine: SpeechEngine {
-    func transcribe(audio: AsyncStream<AudioChunk>) async throws -> String {
-        var buffers: [AVAudioPCMBuffer] = []
-        for await chunk in audio { buffers.append(chunk.buffer) }
+    func transcribe(audio: AsyncStream<AudioChunk>, onPartial: PartialHandler?) async throws -> String {
+        let store = BufferStore()
+        let preview = onPartial.map { onPartial in
+            Task.detached(priority: .userInitiated) { await Self.runPreviews(of: store, onPartial: onPartial) }
+        }
+        for await chunk in audio { store.append(chunk.buffer) }
+        preview?.cancel()
         try Task.checkCancellation()
-        guard let joined = Self.join(buffers) else { return "" }
+        guard let joined = Self.join(store.all) else { return "" }
         let samples = try AudioConverter().resampleBuffer(joined)
         // Less than a tenth of a second is a tap, not speech.
         guard samples.count > 1600 else { return "" }
         return try await ParakeetModel.shared.transcribe(samples)
+    }
+
+    /// Reads the newest audio again and again until cancelled, and reports what it heard.
+    private static func runPreviews(of store: BufferStore, onPartial: PartialHandler) async {
+        let converter = AudioConverter()
+        var lastCount = 0
+        while !Task.isCancelled {
+            try? await Task.sleep(for: LiveText.previewInterval)
+            let buffers = store.all
+            guard buffers.count != lastCount, let format = buffers.first?.format else { continue }
+            lastCount = buffers.count
+            let (start, clipped) = LiveText.tailStart(
+                frameCounts: buffers.map { Int($0.frameLength) },
+                sampleRate: format.sampleRate,
+                window: LiveText.previewWindow
+            )
+            guard let joined = join(Array(buffers[start...])),
+                  let samples = try? converter.resampleBuffer(joined),
+                  Double(samples.count) >= LiveText.minimumAudio * 16000,
+                  let text = await ParakeetModel.shared.preview(samples),
+                  !Task.isCancelled
+            else { continue }
+            onPartial(LiveText.trimmed(text, clipped: clipped))
+        }
     }
 
     /// Joins buffers of one format into one buffer, so resampling has no seams.

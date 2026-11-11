@@ -57,6 +57,12 @@ final class NaviMenu: NSObject, NSMenuDelegate {
             menu.addItem(item("Keep Microphone Ready", on: app.dictation.keepsMicrophoneReady) { [app] in
                 app.dictation.keepsMicrophoneReady.toggle()
             })
+            menu.addItem(item("Tap fn to Start and Stop", on: app.dictation.tapToggles) { [app] in
+                app.dictation.tapToggles.toggle()
+            })
+            menu.addItem(item("Show Words While Talking", on: app.dictation.showsLiveText) { [app] in
+                app.dictation.showsLiveText.toggle()
+            })
         }
         menu.addItem(.separator())
         menu.addItem(item("Close All Cards") { capture.closeAllCards() })

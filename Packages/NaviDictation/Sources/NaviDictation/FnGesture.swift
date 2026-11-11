@@ -6,6 +6,8 @@ import Foundation
 /// - Tap fn twice fast: `begin` on the first press, then `lock` on the second press (hands-free).
 /// - One fn press while locked: `commit` when that press is released.
 /// - One short tap with no second tap: `cancel` (nothing was said).
+/// - With `tapToggles` on: one short tap locks at once (`begin`, then `lock` on release), and the
+///   next press ends it (`commit` on release). Holding still works as push to talk.
 /// - Another modifier (⌘ ⌥ ⌃ ⇧) with fn: `cancel` while listening. fn alone is the only trigger.
 /// - Any other key while fn is held or just tapped (fn+⌫, fn+arrows, fn+F-keys): `cancel`.
 public struct FnGesture: Equatable, Sendable {
@@ -35,6 +37,8 @@ public struct FnGesture: Equatable, Sendable {
     public var holdThreshold: TimeInterval = 0.30
     /// A second tap must come within this time after the first release.
     public var doubleTapWindow: TimeInterval = 0.40
+    /// One tap starts hands-free listening, the next press ends it. No double tap needed.
+    public var tapToggles = false
 
     private(set) var phase: Phase = .idle
 
@@ -73,6 +77,9 @@ public struct FnGesture: Equatable, Sendable {
             if time - since >= holdThreshold {
                 phase = .idle
                 actions.append(.commit)
+            } else if tapToggles {
+                phase = .locked
+                actions.append(.lock)
             } else {
                 phase = .tapped(at: time)
             }

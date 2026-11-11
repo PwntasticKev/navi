@@ -53,8 +53,13 @@ Desktop Icons). Not checked yet: the `⌥⇧⌘N` menu and a second display.
   picture, padding, corners, shadow, aspect ratio, auto balance, presets).
 
 **Talk to type and step 5 are built, not checked by Donovan yet:**
-- `Packages/NaviDictation`: hold fn to talk, double-tap fn to lock, pill with
-  a waveform, on-device speech (Parakeet TDT v3 through FluidAudio, from Hex;
+- `Packages/NaviDictation`: hold fn to talk, double-tap fn to lock ("Tap fn
+  to Start and Stop" in the menu, off by default: one tap locks, the next press
+  types), pill with a waveform and live text ("Show Words While Talking", on by
+  default: one line of words above shorter bars, no wider than the bars, the
+  newest words stay in view and the oldest are cut with "…"; Parakeet reads the newest 10 s again every 0.6 s for it,
+  Apple speech uses its partial results; only shown, the typed text still comes
+  from one full pass), on-device speech (Parakeet TDT v3 through FluidAudio, from Hex;
   `SpeechAnalyzer` or `SFSpeechRecognizer` until the Parakeet model is loaded.
   The model, about 0.5 GB, downloads on first start to
   `~/Library/Application Support/FluidAudio/Models`), cleanup with Foundation Models or rules, paste at the
