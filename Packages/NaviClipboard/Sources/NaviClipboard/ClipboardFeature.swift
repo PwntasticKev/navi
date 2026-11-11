@@ -7,9 +7,16 @@ public final class ClipboardFeature {
     private let inbox: Inbox
     private let watcher: ClipboardWatcher
     private let model: ClipboardModel
-    private lazy var panel = ClipboardPanelController(model: model) { [weak self] item in
-        self?.paste(item)
-    }
+    private lazy var panel: ClipboardPanelController = {
+        let panel = ClipboardPanelController(model: model) { [weak self] item in
+            self?.paste(item)
+        }
+        panel.onAnnotate = { [weak self] item in self?.onAnnotate?(item) }
+        return panel
+    }()
+
+    /// ⌘E on an image in the list: open it in the markup editor. The app wires this to capture.
+    public var onAnnotate: ((CaptureItem) -> Void)?
 
     public init(inbox: Inbox) {
         self.inbox = inbox
@@ -19,6 +26,8 @@ public final class ClipboardFeature {
 
     public func start() {
         watcher.start()
+        model.keepThumbnailsWarm()
+        Task { @MainActor [weak self] in self?.panel.prepare() }
     }
 
     public func showPanel() {

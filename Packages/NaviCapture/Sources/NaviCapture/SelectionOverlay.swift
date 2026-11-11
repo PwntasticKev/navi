@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import NaviCore
 
 /// A full-screen selection, one overlay window per display. The overlay shows at once over the live
 /// screen; the frozen screen images arrive a moment later (`freeze`) and are what gets cropped.
@@ -53,6 +54,9 @@ final class SelectionSession {
     let windows: [OnScreenWindow]
     private var overlays: [OverlayWindow] = []
     private var keyMonitor: Any?
+    /// Esc, Space, and Return as Carbon hot keys while the overlay is up. macOS may refuse to make
+    /// Navi the active app, and then no key event reaches the overlay or the local monitor.
+    private var sessionKeys: [HotKey] = []
     private var completion: ((Outcome) -> Void)?
 
     init(screens: [NSScreen], mode: Mode, windows: [OnScreenWindow], completion: @escaping (Outcome) -> Void) {
@@ -79,6 +83,8 @@ final class SelectionSession {
             if overlay.overlayView.screen == mouseScreen {
                 overlay.makeKey()
                 overlay.makeFirstResponder(overlay.overlayView)
+                // Show the hint and the magnifier now, not after the first mouse move.
+                overlay.overlayView.placeMouse(at: NSEvent.mouseLocation)
             }
         }
         if showsModeBar, let mouseScreen {
@@ -96,6 +102,12 @@ final class SelectionSession {
             }
             return nil
         }
+        sessionKeys = [
+            HotKey(keyCode: UInt32(kVK_Escape), modifiers: 0) { [weak self] in self?.finish(.cancelled) },
+            HotKey(keyCode: UInt32(kVK_Space), modifiers: 0) { [weak self] in self?.toggleMode() },
+            HotKey(keyCode: UInt32(kVK_Return), modifiers: 0) { [weak self] in self?.confirmHeldSelection() },
+            HotKey(keyCode: UInt32(kVK_ANSI_KeypadEnter), modifiers: 0) { [weak self] in self?.confirmHeldSelection() },
+        ].compactMap { $0 }
         refresh()
     }
 
@@ -155,12 +167,33 @@ final class SelectionSession {
         }
     }
 
+    /// The in-place editor takes over from the overlay on a finished area, so the overlay stays up
+    /// until then (hiding it first would flash the live screen).
+    var keepsOverlayUntilDone = false
+
+    /// Takes the overlays and the bar off the screen at once, when the area is done. The session
+    /// still waits for its frozen images.
+    func hideEarly() {
+        guard !keepsOverlayUntilDone else { return }
+        for overlay in overlays { overlay.orderOut(nil) }
+        modeBar?.orderOut(nil)
+        // Send the change to the window server now, not at the end of this run loop pass.
+        CATransaction.flush()
+    }
+
     func finish(_ outcome: Outcome) {
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         keyMonitor = nil
+        for key in sessionKeys { key.unregister() }
+        sessionKeys = []
+        // Esc: just go away. The macOS close animation is only for a finished shot.
+        if case .cancelled = outcome {
+            for overlay in overlays { overlay.animationBehavior = .none }
+            modeBar?.animationBehavior = .none
+        }
         for overlay in overlays { overlay.orderOut(nil) }
-        overlays = []
         modeBar?.orderOut(nil)
+        overlays = []
         modeBar = nil
         let completion = completion
         self.completion = nil
@@ -168,12 +201,16 @@ final class SelectionSession {
     }
 }
 
-final class OverlayWindow: NSWindow {
+/// A non-activating panel: it takes the keys (Esc, Space) and the mouse without bringing Navi to the
+/// front, so other Navi windows (an open markup editor) stay where they are.
+final class OverlayWindow: NSPanel {
     let overlayView: OverlayView
 
     init(screen: NSScreen, view: OverlayView) {
         overlayView = view
-        super.init(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        super.init(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        hidesOnDeactivate = false
+        becomesKeyOnlyIfNeeded = false
         setFrame(screen.frame, display: false)
         level = .screenSaver
         // Clear until the frozen image arrives, so the live screen shows through at once.
@@ -183,7 +220,15 @@ final class OverlayWindow: NSWindow {
         isReleasedWhenClosed = false
         acceptsMouseMovedEvents = true
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-        contentView = view
+        // The frozen screen is the container's layer content, so the GPU shows it and `draw` only
+        // paints the dimming, the box, and the pills on top.
+        let container = NSView(frame: CGRect(origin: .zero, size: screen.frame.size))
+        container.wantsLayer = true
+        container.layer?.contentsGravity = .resize
+        view.frame = container.bounds
+        view.autoresizingMask = [.width, .height]
+        container.addSubview(view)
+        contentView = container
     }
 
     override var canBecomeKey: Bool { true }
@@ -195,6 +240,7 @@ final class OverlayView: NSView {
     /// The frozen screen. Nil for the first moment, while it is being taken.
     var captured: CapturedImage? {
         didSet {
+            superview?.layer?.contents = captured?.image
             needsDisplay = true
             guard captured != nil, let pending = pendingFinish else { return }
             pendingFinish = nil
@@ -316,6 +362,15 @@ final class OverlayView: NSView {
     override func mouseExited(with event: NSEvent) {
         mouse = nil
         updateHighlight()
+        needsDisplay = true
+    }
+
+    /// Sets the mouse from a point in screen coordinates, before any mouse event arrives.
+    func placeMouse(at screenPoint: CGPoint) {
+        guard let window else { return }
+        let point = convert(window.convertPoint(fromScreen: screenPoint), from: nil)
+        guard bounds.contains(point) else { return }
+        mouse = point
         needsDisplay = true
     }
 
@@ -444,6 +499,8 @@ final class OverlayView: NSView {
     func finishSelection() {
         guard mode == .area, let selection, selection.width >= 2, selection.height >= 2 else { return }
         resetDrag()
+        // Off the screen at once. The crop waits for the frozen image if it is not here yet.
+        session?.hideEarly()
         let finish = { [weak self] in
             guard let self, let captured else { return }
             let pixels = CaptureGeometry.pixelRect(forSelection: selection, viewSize: bounds.size, imageSize: imageSize)
@@ -497,7 +554,6 @@ final class OverlayView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         context.interpolationQuality = .high
-        if let captured { context.draw(captured.image, in: bounds) }
 
         let hole: CGRect? = switch mode {
         case .area: visibleSelection

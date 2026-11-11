@@ -10,6 +10,8 @@ final class Card: Identifiable {
     let id = UUID()
     let inboxID: UUID?
     private(set) var image: NSImage
+    /// A small copy of `image` for the card itself, so the slide-in and the hover blur stay smooth.
+    private(set) var thumbnail: NSImage
     private(set) var png: Data
     let createdAt: Date
     /// The file with a readable name, used for drags, copy, and save.
@@ -34,6 +36,7 @@ final class Card: Identifiable {
     init(inboxID: UUID?, image: NSImage, png: Data, createdAt: Date, video: VideoInfo? = nil) throws {
         self.inboxID = inboxID
         self.image = image
+        thumbnail = Self.thumbnail(of: image)
         self.png = png
         self.createdAt = createdAt
         self.video = video
@@ -45,6 +48,7 @@ final class Card: Identifiable {
     /// Swaps in a new image, for example after markup. A saved file is saved again on the next Save.
     func update(image: NSImage, png: Data) {
         self.image = image
+        thumbnail = Self.thumbnail(of: image)
         self.png = png
         savedURL = nil
         try? writeDragFile()
@@ -70,6 +74,24 @@ final class Card: Identifiable {
         } else {
             try png.write(to: url, options: .atomic)
         }
+    }
+
+    /// Scales the image down to fit three times the card size (sharp on a Retina screen).
+    private static func thumbnail(of image: NSImage) -> NSImage {
+        let limit = CGSize(width: CardStack.cardSize.width * 3, height: CardStack.cardSize.height * 3)
+        guard let source = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image }
+        let factor = min(limit.width / CGFloat(source.width), limit.height / CGFloat(source.height))
+        guard factor < 1 else { return image }
+        let width = max(1, Int(CGFloat(source.width) * factor))
+        let height = max(1, Int(CGFloat(source.height) * factor))
+        guard let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return image }
+        context.interpolationQuality = .high
+        context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let small = context.makeImage() else { return image }
+        return NSImage(cgImage: small, size: image.size)
     }
 
     var cgImage: CGImage? { image.cgImage(forProposedRect: nil, context: nil, hints: nil) }
@@ -106,6 +128,11 @@ final class CardStack {
 
     /// Each card remembers its display, so cards stay where they were captured.
     private var entries: [(card: Card, panel: NSPanel, screen: NSScreen?)] = []
+
+    /// The open card for a history item, if there is one.
+    func card(forInboxID id: UUID) -> Card? {
+        entries.first { $0.card.inboxID == id }?.card
+    }
     private var timers: [UUID: Timer] = [:]
     private var hovered: Set<UUID> = []
     /// ⌘C, ⌘S, and ⌘W for the card under the mouse. They exist only while the mouse is on a card,
@@ -284,7 +311,7 @@ struct CornerCardView: View {
     var body: some View {
         ZStack {
             Color(white: 0.16)
-            Image(nsImage: card.image)
+            Image(nsImage: card.thumbnail)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .blur(radius: isHovering ? 8 : 0)

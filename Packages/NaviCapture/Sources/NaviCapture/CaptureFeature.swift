@@ -1,6 +1,7 @@
 import AVFoundation
 import AppKit
 import NaviCore
+import ScreenCaptureKit
 import os
 
 /// A part of the screen to record. The app passes it to the recording feature.
@@ -37,6 +38,10 @@ public final class CaptureFeature {
     private let pins = PinBoard()
     private var session: SelectionSession?
     private var scrollSession: ScrollCaptureSession?
+    /// Edit after capture, while it is open.
+    private var inPlaceEditor: InPlaceAnnotator?
+    /// The frozen screens of the running selection. Edit after capture shows them behind the area.
+    private var frozenScreens: [(NSScreen, CapturedImage)] = []
     /// Open editor windows, kept alive until they close.
     private var editors: [UUID: AnyObject] = [:]
     private var isBusy = false
@@ -68,10 +73,17 @@ public final class CaptureFeature {
     /// Screen Recording permission, needed for every capture.
     public static var hasScreenAccess: Bool { CGPreflightScreenCaptureAccess() }
 
-    /// Shows the macOS prompt, or adds Navi to System Settings > Privacy & Security > Screen Recording.
-    public static func requestScreenAccess() {
-        if !CGRequestScreenCaptureAccess(),
-           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+    /// Asks for Screen Recording the way ScreenCaptureKit apps do. macOS shows its prompt and adds
+    /// Navi to System Settings > Privacy & Security > Screen Recording, switched off, so the user
+    /// only flips the switch (never the + button). Then the settings page opens if access is still off.
+    public static func requestScreenAccess(openSettings: Bool = true) {
+        Task { @MainActor in
+            _ = CGRequestScreenCaptureAccess()
+            // Asking ScreenCaptureKit for the screen list is what lists the app in Settings.
+            _ = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            guard openSettings, !CGPreflightScreenCaptureAccess(),
+                  let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+            else { return }
             NSWorkspace.shared.open(url)
         }
     }
@@ -115,6 +127,7 @@ public final class CaptureFeature {
         }
         guard let screen = NSScreen.underMouse else {
             isBusy = false
+            copiesNextShot = false
             return
         }
         captureFullscreen(on: screen, timer: 0, sourceApp: NSWorkspace.shared.frontmostApplication)
@@ -198,14 +211,18 @@ public final class CaptureFeature {
         session.showsModeBar = modeBar
         session.holdsSelection = modeBar
         session.canRecord = onRecordRequest != nil
+        session.keepsOverlayUntilDone = purpose == .screenshot && timer == 0 && settings.editAfterCapture
         self.session = session
-        NSApp.activate()
+        // No NSApp.activate(): the overlay panels take the keys without raising Navi's other windows.
         session.begin()
         Task { [weak self, weak session] in
             guard let self else { return }
             do {
                 let screens = try await ScreenGrabber.captureAllScreens(hideDesktopIcons: settings.hideDesktopIcons)
-                session?.freeze(screens)
+                // A selection cancelled before the freeze arrived must not keep the images.
+                guard let session else { return }
+                frozenScreens = screens
+                session.freeze(screens)
             } catch {
                 logger.error("Could not freeze the screen: \(error.localizedDescription)")
                 session?.finish(.cancelled)
@@ -217,6 +234,13 @@ public final class CaptureFeature {
         _ outcome: SelectionSession.Outcome, purpose: SelectionSession.Purpose, timer: Int, previousApp: NSRunningApplication?
     ) {
         session = nil
+        let frozen = frozenScreens
+        frozenScreens = []
+        if case let (.area(captured, screen, rect), .screenshot) = (outcome, purpose), timer == 0, settings.editAfterCapture {
+            let backdrop = frozen.first { $0.0 == screen }?.1.image
+            editInPlace(captured, backdrop: backdrop, on: screen, rect: rect, sourceApp: previousApp)
+            return
+        }
         previousApp?.activate()
         switch (outcome, purpose) {
         case (.cancelled, _):
@@ -302,6 +326,75 @@ public final class CaptureFeature {
         scroll.begin()
     }
 
+    // MARK: Edit after capture
+
+    /// Keeps the capture busy until Return (copy) or Esc (cancel).
+    private func editInPlace(
+        _ captured: CapturedImage, backdrop: CGImage?, on screen: NSScreen, rect: CGRect, sourceApp: NSRunningApplication?
+    ) {
+        let editor = InPlaceAnnotator(captured: captured, backdrop: backdrop, screen: screen, area: rect) { [weak self] result in
+            guard let self else { return }
+            inPlaceEditor = nil
+            isBusy = false
+            sourceApp?.activate()
+            if let (action, result) = result {
+                deliverEdited(result, action: action, on: screen, sourceApp: sourceApp)
+            } else {
+                copiesNextShot = false
+            }
+        }
+        inPlaceEditor = editor
+        editor.show()
+    }
+
+    /// Copies, saves, or stashes the marked-up shot. It always goes to the history,
+    /// with its marks kept editable.
+    private func deliverEdited(
+        _ result: AnnotateEditor.Result, action: InPlaceAnnotator.Action, on screen: NSScreen, sourceApp: NSRunningApplication?
+    ) {
+        copiesNextShot = false
+        let image = Self.image(result.flat, pointSize: result.pointSize)
+        if action == .copy {
+            NaviPasteboard.write(image: image)
+            Toast.show("Copied", on: screen)
+        }
+        guard let png = ImageOps.png(result.flat, pointSize: result.pointSize) else {
+            logger.error("Could not encode the edited capture as PNG")
+            return
+        }
+        let item = inbox.add(
+            fileData: png, fileExtension: "png", kind: .screenshot,
+            sourceApp: sourceApp?.localizedName, sourceBundleID: sourceApp?.bundleIdentifier, deduplicate: false
+        )
+        if let id = item?.id {
+            do {
+                try MarkupStore.save(base: result.base, document: result.document, to: inbox.markupURL(for: id))
+            } catch {
+                logger.error("Could not save the markup: \(error.localizedDescription)")
+            }
+        }
+        switch action {
+        case .copy:
+            break
+        case .save:
+            let createdAt = Date.now
+            let folder = settings.saveFolder
+            let url = CaptureGeometry.uniqueURL(
+                in: folder, name: CaptureGeometry.fileName(for: createdAt, fileExtension: "png")
+            ) { FileManager.default.fileExists(atPath: $0.path) }
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try png.write(to: url, options: .atomic)
+                Toast.show("Saved to \(folder.lastPathComponent)", on: screen)
+            } catch {
+                logger.error("Could not save the capture: \(error.localizedDescription)")
+                NSSound.beep()
+            }
+        case .stash:
+            Toast.show("Stashed. ⇧⌘V to find it", on: screen)
+        }
+    }
+
     // MARK: Delivery
 
     private func deliver(_ captured: CapturedImage, on screen: NSScreen, sourceApp: NSRunningApplication?) {
@@ -313,19 +406,29 @@ public final class CaptureFeature {
             NaviPasteboard.write(image: Self.image(captured.image, pointSize: pointSize))
         }
         copiesNextShot = false
-        guard let png = ImageOps.png(captured.image, pointSize: pointSize) else {
-            logger.error("Could not encode the capture as PNG")
-            return
-        }
-        let item = inbox.add(
-            fileData: png, fileExtension: "png", kind: .screenshot,
-            sourceApp: sourceApp?.localizedName, sourceBundleID: sourceApp?.bundleIdentifier, deduplicate: false
-        )
-        do {
-            let card = try Card(inboxID: item?.id, image: Self.image(captured.image, pointSize: pointSize), png: png, createdAt: .now)
-            cards.show(card, on: screen)
-        } catch {
-            logger.error("Could not make the corner card: \(error.localizedDescription)")
+        let started = ContinuousClock.now
+        let image = captured.image
+        Task {
+            // PNG encoding takes about 0.1 s for a full 4K screen, so it runs off the main thread.
+            let encoded = await Task.detached(priority: .userInitiated) {
+                ImageOps.png(image, pointSize: pointSize)
+            }.value
+            guard let png = encoded else {
+                logger.error("Could not encode the capture as PNG")
+                return
+            }
+            let item = inbox.add(
+                fileData: png, fileExtension: "png", kind: .screenshot,
+                sourceApp: sourceApp?.localizedName, sourceBundleID: sourceApp?.bundleIdentifier, deduplicate: false
+            )
+            do {
+                let card = try Card(inboxID: item?.id, image: Self.image(image, pointSize: pointSize), png: png, createdAt: .now)
+                cards.show(card, on: screen)
+            } catch {
+                logger.error("Could not make the corner card: \(error.localizedDescription)")
+            }
+            let elapsed = ContinuousClock.now - started
+            logger.info("Capture to card: \(Int(elapsed / .milliseconds(1))) ms")
         }
     }
 
@@ -379,6 +482,41 @@ public final class CaptureFeature {
     private func showInFinder(_ card: Card) {
         guard let url = save(card, thenClose: false) else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    /// Opens the markup editor for an image in the history (⌘E in the ⇧⌘V list). Marks from an
+    /// earlier edit stay editable. Done updates the history item and its open card, if any.
+    public func annotate(inboxID id: UUID) {
+        if let card = cards.card(forInboxID: id) {
+            annotate(card)
+            return
+        }
+        guard let data = inbox.fileData(for: id),
+              let bitmap = NSBitmapImageRep(data: data), let flat = bitmap.cgImage
+        else { return }
+        let scale = bitmap.size.width > 0 ? CGFloat(bitmap.pixelsWide) / bitmap.size.width : 1
+        var base = flat
+        var document = AnnotationDocument()
+        if let saved = MarkupStore.load(from: inbox.markupURL(for: id)) { (base, document) = saved }
+        let token = UUID()
+        let editor = AnnotateEditor(base: base, document: document, scale: scale) { [weak self] result in
+            self?.applyMarkup(result, toInboxID: id)
+        } onClose: { [weak self] in
+            self?.editors[token] = nil
+        }
+        editors[token] = editor
+        editor.show()
+    }
+
+    private func applyMarkup(_ result: AnnotateEditor.Result, toInboxID id: UUID) {
+        guard let png = ImageOps.png(result.flat, pointSize: result.pointSize) else { return }
+        if settings.copyToClipboard { NaviPasteboard.write(image: Self.image(result.flat, pointSize: result.pointSize)) }
+        inbox.updateFile(id, data: png)
+        do {
+            try MarkupStore.save(base: result.base, document: result.document, to: inbox.markupURL(for: id))
+        } catch {
+            logger.error("Could not save the markup: \(error.localizedDescription)")
+        }
     }
 
     /// Opens the markup editor. Marks from an earlier edit stay editable.

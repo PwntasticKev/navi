@@ -1,6 +1,7 @@
 import AppKit
 import NaviCapture
 import NaviClipboard
+import NaviCore
 import NaviDictation
 
 /// The Navi menu. It shows from the menu bar icon, and at the mouse with `⌥⇧⌘N`, which still works
@@ -52,6 +53,11 @@ final class NaviMenu: NSObject, NSMenuDelegate {
         menu.addItem(item("Talk to Type (Hold fn)", on: app.dictation.isEnabled) { [app] in
             app.setTalkToType(!app.dictation.isEnabled)
         })
+        if app.dictation.isEnabled {
+            menu.addItem(item("Keep Microphone Ready", on: app.dictation.keepsMicrophoneReady) { [app] in
+                app.dictation.keepsMicrophoneReady.toggle()
+            })
+        }
         menu.addItem(.separator())
         menu.addItem(item("Close All Cards") { capture.closeAllCards() })
         if capture.hasPins {
@@ -65,11 +71,15 @@ final class NaviMenu: NSObject, NSMenuDelegate {
         menu.addItem(item("Copy Screenshots to Clipboard", on: settings.copyToClipboard) {
             settings.copyToClipboard.toggle()
         })
+        menu.addItem(item("Edit Screenshots Before Copying", on: settings.editAfterCapture) {
+            settings.editAfterCapture.toggle()
+        })
         menu.addItem(item("Use Navi for Screenshot Keys", on: settings.useNaviScreenshotKeys == true) { [app] in
             app.setUseNaviScreenshotKeys(settings.useNaviScreenshotKeys != true)
         })
         menu.addItem(.separator())
-        menu.addItem(item("Open History", key: "v", [.command, .shift]) { [app] in app.clipboard.togglePanel() })
+        menu.addItem(shortcutItem("Open History", app.historyShortcut) { [app] in app.clipboard.togglePanel() })
+        menu.addItem(item("Change History Shortcut…") { [app] in app.changeHistoryShortcut() })
         menu.addItem(item("Clear History") { [app] in app.inbox.clearUnpinned() })
         menu.addItem(.separator())
         menu.addItem(item("Accessibility Permission…") { ClipboardFeature.requestAccessibility() })
@@ -80,6 +90,14 @@ final class NaviMenu: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(item("Check for Updates…") { [app] in app.updater.checkForUpdates(nil) })
         menu.addItem(item("Quit Navi", key: "q", .command) { NSApp.terminate(nil) })
+    }
+
+    /// A menu item that shows `combo`. A one-character key uses the native key equivalent; other keys go in the title.
+    private func shortcutItem(
+        _ title: String, _ combo: KeyCombo, action: @escaping @MainActor () -> Void
+    ) -> NSMenuItem {
+        guard combo.keyName.count == 1 else { return item("\(title) (\(combo.display))", action: action) }
+        return item(title, key: combo.keyName.lowercased(), combo.cocoaModifiers, action: action)
     }
 
     /// A menu item that runs `action`. `key` only shows the shortcut; the global hot keys do the work.
