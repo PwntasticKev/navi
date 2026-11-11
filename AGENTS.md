@@ -279,6 +279,7 @@ cd Packages/NaviRecording && swift test # recording math, GIF, audio mixdown
 cd Packages/NaviDictation && swift test # cleanup rules, fn gestures, fn setting, scoring
 cd Packages/NaviDictation && swift run dictation-bench [--audio [--speech apple,parakeet]] [--failures] [--save]
 cd Packages/NaviClipboard && swift run -c release history-bench [--sizes 200,1000,5000] [--corpus ascii|mixed] [--save]  # History list benchmark
+swift scripts/comments.swift [--fix]  # fails on any comment in Swift code; --fix removes them
 scripts/tests/run.sh    # release script tests (plan, notes HTML, Sparkle signature checker)
 MODE=dry-run VERSION=9.9.9 BUILD=1 NOTES=x SKIP_TESTS=1 scripts/ci-release.sh  # release without Apple keys; nothing published
 scripts/dev.sh          # build and run Navi Dev in place of Navi (fresh: wipe it first; stop: back to Navi)
@@ -359,6 +360,9 @@ Screen Recording permissions between builds.
 
 ## Rules
 
+- No comments in Swift code. CI runs `swift scripts/comments.swift` and fails on any
+  comment. Allowed: `// swift-tools-version` in `Package.swift`, and a license header at
+  the top of a file (it must say Copyright and License).
 - `@MainActor` on UI and state types. Swift 6 strict concurrency must build
   with no warnings.
 - Put pure logic in packages with unit tests (Swift Testing). Test `NaviCore`
