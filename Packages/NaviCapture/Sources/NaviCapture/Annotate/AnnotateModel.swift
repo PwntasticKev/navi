@@ -39,6 +39,9 @@ final class AnnotateModel {
             if tool != .select { selection = nil }
             if tool != .crop { cropRect = nil }
             commitText()
+            // Picking the text tool opens a box at once, so you can type without a click.
+            // A click elsewhere moves the empty box there.
+            if tool == .text, oldValue != .text { startText(at: hoverPoint ?? defaultTextPoint) }
             render()
         }
     }
@@ -71,6 +74,8 @@ final class AnnotateModel {
     @ObservationIgnored private var isSyncingStyle = false
     /// A text mark that was already selected when the pointer went down. A click without a drag edits it.
     @ObservationIgnored private var clickedSelectedText: UUID?
+    /// Where the mouse is over the image, in image pixels. Nil while it is off the image.
+    @ObservationIgnored private var hoverPoint: CGPoint?
 
     var canUndo: Bool { undoStack.canUndo }
     var canRedo: Bool { undoStack.canRedo }
@@ -85,6 +90,21 @@ final class AnnotateModel {
     }
 
     // MARK: Pointer input, in image pixels
+
+    /// The mouse moved over the image (nil: it left the image).
+    func pointerMoved(to point: CGPoint?) {
+        hoverPoint = point
+    }
+
+    private func startText(at point: CGPoint) {
+        textEdit = TextEdit(point: point, text: "")
+    }
+
+    /// Where a text box opens when the mouse is not over the image: a quarter in from the left,
+    /// halfway down, so the box has room to grow to the right.
+    private var defaultTextPoint: CGPoint {
+        CGPoint(x: pixelSize.width / 4, y: max(0, (pixelSize.height - fontSize) / 2))
+    }
 
     func pointerDown(at point: CGPoint) {
         clickedSelectedText = nil

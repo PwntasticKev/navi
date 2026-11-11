@@ -37,6 +37,38 @@ import Testing
         #expect(model.selection == mark.id)
     }
 
+    @Test func pickingTheTextToolOpensABoxAtOnce() throws {
+        let model = try makeModel()
+        model.tool = .text
+        let edit = try #require(model.textEdit)
+        #expect(edit.text.isEmpty)
+        #expect(edit.id == nil)
+        #expect(CGRect(x: 0, y: 0, width: 400, height: 300).contains(edit.point))
+    }
+
+    @Test func textToolOpensTheBoxAtTheMouseWhenItIsOverTheImage() throws {
+        let model = try makeModel()
+        model.pointerMoved(to: CGPoint(x: 120, y: 80))
+        model.tool = .text
+        #expect(model.textEdit?.point == CGPoint(x: 120, y: 80))
+    }
+
+    @Test func leavingTheImageForgetsTheMouse() throws {
+        let model = try makeModel()
+        model.pointerMoved(to: CGPoint(x: 120, y: 80))
+        model.pointerMoved(to: nil)
+        model.tool = .text
+        #expect(model.textEdit?.point != CGPoint(x: 120, y: 80))
+    }
+
+    @Test func switchingAwayFromAnEmptyAutoBoxLeavesNoMark() throws {
+        let model = try makeModel()
+        model.tool = .text
+        model.tool = .arrow
+        #expect(model.textEdit == nil)
+        #expect(model.document.annotations.isEmpty)
+    }
+
     @Test func emptyTextBoxMovesToTheNextClick() throws {
         let model = try makeModel()
         model.tool = .text

@@ -43,8 +43,13 @@ struct AnnotateCanvas: View {
                 .gesture(drawGesture(fit: fit))
                 .onContinuousHover { phase in
                     switch phase {
-                    case let .active(location): model.cursor(at: pixel(location, fit: fit)).set()
-                    case .ended: NSCursor.arrow.set()
+                    case let .active(location):
+                        let point = pixel(location, fit: fit)
+                        model.pointerMoved(to: point)
+                        model.cursor(at: point).set()
+                    case .ended:
+                        model.pointerMoved(to: nil)
+                        NSCursor.arrow.set()
                     }
                 }
                 .onDrop(of: [.fileURL, .image], isTargeted: nil) { providers in
