@@ -211,6 +211,7 @@ public final class CaptureFeature {
         session.showsModeBar = modeBar
         session.holdsSelection = modeBar
         session.canRecord = onRecordRequest != nil
+        session.keepsOverlayUntilDone = purpose == .screenshot && timer == 0 && settings.editAfterCapture
         self.session = session
         // No NSApp.activate(): the overlay panels take the keys without raising Navi's other windows.
         session.begin()
@@ -379,19 +380,29 @@ public final class CaptureFeature {
             NaviPasteboard.write(image: Self.image(captured.image, pointSize: pointSize))
         }
         copiesNextShot = false
-        guard let png = ImageOps.png(captured.image, pointSize: pointSize) else {
-            logger.error("Could not encode the capture as PNG")
-            return
-        }
-        let item = inbox.add(
-            fileData: png, fileExtension: "png", kind: .screenshot,
-            sourceApp: sourceApp?.localizedName, sourceBundleID: sourceApp?.bundleIdentifier, deduplicate: false
-        )
-        do {
-            let card = try Card(inboxID: item?.id, image: Self.image(captured.image, pointSize: pointSize), png: png, createdAt: .now)
-            cards.show(card, on: screen)
-        } catch {
-            logger.error("Could not make the corner card: \(error.localizedDescription)")
+        let started = ContinuousClock.now
+        let image = captured.image
+        Task {
+            // PNG encoding takes about 0.1 s for a full 4K screen, so it runs off the main thread.
+            let encoded = await Task.detached(priority: .userInitiated) {
+                ImageOps.png(image, pointSize: pointSize)
+            }.value
+            guard let png = encoded else {
+                logger.error("Could not encode the capture as PNG")
+                return
+            }
+            let item = inbox.add(
+                fileData: png, fileExtension: "png", kind: .screenshot,
+                sourceApp: sourceApp?.localizedName, sourceBundleID: sourceApp?.bundleIdentifier, deduplicate: false
+            )
+            do {
+                let card = try Card(inboxID: item?.id, image: Self.image(image, pointSize: pointSize), png: png, createdAt: .now)
+                cards.show(card, on: screen)
+            } catch {
+                logger.error("Could not make the corner card: \(error.localizedDescription)")
+            }
+            let elapsed = ContinuousClock.now - started
+            logger.info("Capture to card: \(Int(elapsed / .milliseconds(1))) ms")
         }
     }
 

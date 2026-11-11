@@ -81,6 +81,8 @@ final class SelectionSession {
             if overlay.overlayView.screen == mouseScreen {
                 overlay.makeKey()
                 overlay.makeFirstResponder(overlay.overlayView)
+                // Show the hint and the magnifier now, not after the first mouse move.
+                overlay.overlayView.placeMouse(at: NSEvent.mouseLocation)
             }
         }
         if showsModeBar, let mouseScreen {
@@ -163,14 +165,33 @@ final class SelectionSession {
         }
     }
 
+    /// The in-place editor takes over from the overlay on a finished area, so the overlay stays up
+    /// until then (hiding it first would flash the live screen).
+    var keepsOverlayUntilDone = false
+
+    /// Takes the overlays and the bar off the screen at once, when the area is done. The session
+    /// still waits for its frozen images.
+    func hideEarly() {
+        guard !keepsOverlayUntilDone else { return }
+        for overlay in overlays { overlay.orderOut(nil) }
+        modeBar?.orderOut(nil)
+        // Send the change to the window server now, not at the end of this run loop pass.
+        CATransaction.flush()
+    }
+
     func finish(_ outcome: Outcome) {
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         keyMonitor = nil
         for key in sessionKeys { key.unregister() }
         sessionKeys = []
+        // Esc: just go away. The macOS close animation is only for a finished shot.
+        if case .cancelled = outcome {
+            for overlay in overlays { overlay.animationBehavior = .none }
+            modeBar?.animationBehavior = .none
+        }
         for overlay in overlays { overlay.orderOut(nil) }
-        overlays = []
         modeBar?.orderOut(nil)
+        overlays = []
         modeBar = nil
         let completion = completion
         self.completion = nil
@@ -197,7 +218,15 @@ final class OverlayWindow: NSPanel {
         isReleasedWhenClosed = false
         acceptsMouseMovedEvents = true
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-        contentView = view
+        // The frozen screen is the container's layer content, so the GPU shows it and `draw` only
+        // paints the dimming, the box, and the pills on top.
+        let container = NSView(frame: CGRect(origin: .zero, size: screen.frame.size))
+        container.wantsLayer = true
+        container.layer?.contentsGravity = .resize
+        view.frame = container.bounds
+        view.autoresizingMask = [.width, .height]
+        container.addSubview(view)
+        contentView = container
     }
 
     override var canBecomeKey: Bool { true }
@@ -209,6 +238,7 @@ final class OverlayView: NSView {
     /// The frozen screen. Nil for the first moment, while it is being taken.
     var captured: CapturedImage? {
         didSet {
+            superview?.layer?.contents = captured?.image
             needsDisplay = true
             guard captured != nil, let pending = pendingFinish else { return }
             pendingFinish = nil
@@ -322,6 +352,15 @@ final class OverlayView: NSView {
         needsDisplay = true
     }
 
+    /// Sets the mouse from a point in screen coordinates, before any mouse event arrives.
+    func placeMouse(at screenPoint: CGPoint) {
+        guard let window else { return }
+        let point = convert(window.convertPoint(fromScreen: screenPoint), from: nil)
+        guard bounds.contains(point) else { return }
+        mouse = point
+        needsDisplay = true
+    }
+
     override func mouseMoved(with event: NSEvent) {
         let point = location(of: event)
         mouse = point
@@ -405,6 +444,8 @@ final class OverlayView: NSView {
     func finishSelection() {
         guard mode == .area, let selection, selection.width >= 2, selection.height >= 2 else { return }
         resetDrag()
+        // Off the screen at once. The crop waits for the frozen image if it is not here yet.
+        session?.hideEarly()
         let finish = { [weak self] in
             guard let self, let captured else { return }
             let pixels = CaptureGeometry.pixelRect(forSelection: selection, viewSize: bounds.size, imageSize: imageSize)
@@ -454,7 +495,6 @@ final class OverlayView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         context.interpolationQuality = .high
-        if let captured { context.draw(captured.image, in: bounds) }
 
         let hole: CGRect? = switch mode {
         case .area: selection

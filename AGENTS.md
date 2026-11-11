@@ -130,7 +130,10 @@ video editor.
   mouse without activating Navi, so an open markup editor is not raised.
 - The selection overlay shows at once over the live screen. The frozen screen
   images arrive about 0.2 s later and are what gets cropped; a selection that
-  ends first waits for them.
+  ends first waits for them, off screen. The overlay leaves the screen on mouse
+  up. The frozen image is the overlay's layer content (GPU), and the hint pill
+  shows at once at the mouse. PNG encoding runs off the main thread; the card
+  draws a small thumbnail. The time logs under `Capture` ("Capture to card").
 - Screen Recording is requested at launch through ScreenCaptureKit
   (`SCShareableContent`), which lists Navi in System Settings, switched off, so
   users only flip the switch.
