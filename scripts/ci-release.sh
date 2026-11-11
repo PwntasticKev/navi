@@ -88,13 +88,15 @@ step "Archiving Release"
 rm -rf "$work" "$dist"
 mkdir -p "$work" "$dist"
 archive="$work/Navi.xcarchive"
-identity="Developer ID Application"
-(( signed )) || identity="-"
+# Signed modes use the Release identity in project.yml (Developer ID, app target only).
+# dry-run signs everything ad hoc, which package resource bundles accept.
+overrides=()
+(( signed )) || overrides=(CODE_SIGN_IDENTITY=-)
 xcodegen generate >/dev/null
 xcodebuild -project Navi.xcodeproj -scheme Navi -configuration Release \
   -derivedDataPath build.noindex -archivePath "$archive" -quiet archive \
   MARKETING_VERSION="$version" CURRENT_PROJECT_VERSION="$build" SPARKLE_PUBLIC_KEY="$expected_key" \
-  CODE_SIGN_IDENTITY="$identity" DEVELOPMENT_TEAM="$team"
+  "${overrides[@]}"
 
 if (( signed )); then
   step "Signing with Developer ID"
