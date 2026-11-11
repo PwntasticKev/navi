@@ -77,8 +77,9 @@ struct WindowSpotlightTests {
             Issue.record("Expected an area, got \(String(describing: rig.outcome()))")
             return
         }
-        #expect(rect.width == 200)
-        #expect(rect.height == 200)
+        // The pixels under both corners are inside: 400 pixels apart plus the end pixel, at 2x.
+        #expect(rect.width == 200.5)
+        #expect(rect.height == 200.5)
     }
 
     @Test func clickOnTheDesktopPicksNothing() {

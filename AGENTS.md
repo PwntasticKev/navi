@@ -143,6 +143,11 @@ video editor.
   up. The frozen image is the overlay's layer content (GPU), and the hint pill
   shows at once at the mouse. PNG encoding runs off the main thread; the card
   draws a small thumbnail. The time logs under `Capture` ("Capture to card").
+- Area selection is pixel exact: the pixels under both corners of the drag (the
+  pixel the magnifier centers on) are in the shot, and the outline shows the
+  exact crop. A corner snaps (6 pt) only to a window edge you can see near the
+  cursor, never to the hidden edge of a window behind another one, and the
+  magnifier shows the snapped point.
 - Screen Recording is requested at launch through ScreenCaptureKit
   (`SCShareableContent`), which lists Navi in System Settings, switched off, so
   users only flip the switch.

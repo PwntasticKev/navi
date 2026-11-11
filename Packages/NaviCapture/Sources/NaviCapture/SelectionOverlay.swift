@@ -505,7 +505,8 @@ final class OverlayView: NSView {
             guard let self, let captured else { return }
             let pixels = CaptureGeometry.pixelRect(forSelection: selection, viewSize: bounds.size, imageSize: imageSize)
             guard let cropped = captured.image.cropping(to: pixels) else { return }
-            let topLeft = CGRect(x: selection.minX, y: bounds.height - selection.maxY, width: selection.width, height: selection.height)
+            let area = CaptureGeometry.viewRect(forPixels: pixels, viewSize: bounds.size, imageSize: imageSize)
+            let topLeft = CGRect(x: area.minX, y: bounds.height - area.maxY, width: area.width, height: area.height)
             session?.finish(.area(CapturedImage(image: cropped, scale: captured.scale), screen, rect: topLeft))
         }
         if captured == nil { pendingFinish = finish } else { finish() }
@@ -529,6 +530,13 @@ final class OverlayView: NSView {
         return selection
     }
 
+    /// The visible selection as it will be cropped: whole pixels, with the pixels under both corners inside.
+    private var croppedArea: CGRect? {
+        guard let selection = visibleSelection else { return nil }
+        let pixels = CaptureGeometry.pixelRect(forSelection: selection, viewSize: bounds.size, imageSize: imageSize)
+        return CaptureGeometry.viewRect(forPixels: pixels, viewSize: bounds.size, imageSize: imageSize)
+    }
+
     /// App window frames in this view's coordinates, front to back.
     private var localWindows: [OnScreenWindow] {
         let origin = screen.frame.origin
@@ -540,13 +548,15 @@ final class OverlayView: NSView {
     }
 
     private func snapped(_ point: CGPoint) -> CGPoint {
-        let frames = localWindows.map(\.frame)
-        let xs: [CGFloat] = [0, bounds.width] + frames.flatMap { frame -> [CGFloat] in [frame.minX, frame.maxX] }
-        let ys: [CGFloat] = [0, bounds.height] + frames.flatMap { frame -> [CGFloat] in [frame.minY, frame.maxY] }
-        return CGPoint(
-            x: CaptureGeometry.snap(point.x, to: xs, tolerance: 6),
-            y: CaptureGeometry.snap(point.y, to: ys, tolerance: 6)
-        )
+        CaptureGeometry.snap(point, toWindows: localWindows.map(\.frame), bounds: bounds, tolerance: 6)
+    }
+
+    /// The point the magnifier shows: where a drag starts or ends now, so it matches the crop.
+    private var magnifierPoint: CGPoint? {
+        guard let mouse else { return nil }
+        if moveStart != nil || isHolding && dragStart == nil { return mouse }
+        if let dragCurrent, dragStart != nil { return dragCurrent }
+        return snapped(mouse)
     }
 
     // MARK: Drawing
@@ -556,7 +566,7 @@ final class OverlayView: NSView {
         context.interpolationQuality = .high
 
         let hole: CGRect? = switch mode {
-        case .area: visibleSelection
+        case .area: croppedArea
         case .window: mouse.flatMap { hoveredWindow(at: $0)?.frame }
         }
 
@@ -575,14 +585,14 @@ final class OverlayView: NSView {
 
         switch mode {
         case .area:
-            if let selection = visibleSelection {
+            if let selection = visibleSelection, let area = croppedArea {
                 context.setStrokeColor(NSColor.white.cgColor)
                 context.setLineWidth(1)
-                context.stroke(selection.insetBy(dx: -0.5, dy: -0.5))
-                if isHolding { drawCornerHandles(of: selection, in: context) }
+                context.stroke(area.insetBy(dx: -0.5, dy: -0.5))
+                if isHolding { drawCornerHandles(of: area, in: context) }
                 drawSizeLabel(for: selection)
             }
-            if let mouse, let captured { drawMagnifier(at: mouse, image: captured.image, in: context) }
+            if let point = magnifierPoint, let captured { drawMagnifier(at: point, image: captured.image, in: context) }
         case .window:
             if let hole {
                 context.setFillColor(Self.accent.withAlphaComponent(0.18).cgColor)
