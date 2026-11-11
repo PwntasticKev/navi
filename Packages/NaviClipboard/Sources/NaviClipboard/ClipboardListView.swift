@@ -20,6 +20,7 @@ struct ClipboardListView: View {
         .frame(width: Metrics.width, height: model.contentHeight, alignment: .top)
         .font(.system(size: 13))
         .onAppear { searchFocused = true }
+        .onChange(of: model.opens) { searchFocused = true }
     }
 
     private var header: some View {
@@ -53,28 +54,22 @@ struct ClipboardListView: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(Array(results.enumerated()), id: \.element.id) { index, item in
-                            ClipboardRow(
-                                item: item,
-                                index: index,
-                                isSelected: index == model.selection,
-                                image: item.fileName == nil ? nil : model.image(for: item)
-                            )
+                            ClipboardRow(model: model, item: item, index: index)
                             .frame(height: Metrics.rowHeight(for: item))
                             .id(item.id)
                             .contentShape(Rectangle())
                             .onHover { inside in if inside { model.hover(index) } }
                             .onTapGesture { onChoose(item) }
-                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
-                                model.rowFrames[item.id] = frame
-                            }
                         }
                     }
                     .padding(Metrics.listPadding)
+                    .id(SelectionFollower.listID)
                 }
                 .scrollIndicators(.never)
-                .onChange(of: model.selection) { _, selection in
-                    if results.indices.contains(selection) { proxy.scrollTo(results[selection].id) }
+                .onScrollGeometryChange(for: CGRect.self) { $0.visibleRect } action: { _, visible in
+                    model.visibleRect = visible
                 }
+                .background(SelectionFollower(model: model, results: results, proxy: proxy))
             }
         }
     }
@@ -90,11 +85,53 @@ struct ClipboardListView: View {
     }
 }
 
+/// Scrolls the list: to the selected row when the keyboard moved it off screen, and to the top on each open.
+/// It reads the selection here, so a selection change redraws this view and the rows, not the whole list.
+private struct SelectionFollower: View {
+    let model: ClipboardModel
+    let results: [CaptureItem]
+    let proxy: ScrollViewProxy
+    /// The padded list. Scrolling to its top or bottom keeps the padding that scrolling to a row would cut off.
+    static let listID = "list"
+
+    var body: some View {
+        Color.clear
+            .onChange(of: model.selection) { _, selection in
+                // `scrollTo` is the costly part of a selection step, so skip it for a row that is in view.
+                guard !model.selectedByHover, let anchor = model.scrollAnchor(for: selection, in: results) else { return }
+                if selection == 0 || selection == results.count - 1 {
+                    proxy.scrollTo(Self.listID, anchor: anchor)
+                } else {
+                    proxy.scrollTo(results[selection].id, anchor: anchor)
+                }
+            }
+            .onChange(of: model.opens) { proxy.scrollTo(Self.listID, anchor: .top) }
+    }
+}
+
+/// Reads the selection, so every visible row re-runs this small body on a selection change.
 private struct ClipboardRow: View {
+    let model: ClipboardModel
+    let item: CaptureItem
+    let index: Int
+
+    var body: some View {
+        ClipboardRowContent(model: model, item: item, index: index, isSelected: model.selection == index)
+            .equatable()
+    }
+}
+
+/// The row itself. Equatable, so only the rows whose selected state changed are drawn again.
+private struct ClipboardRowContent: View, @MainActor Equatable {
+    let model: ClipboardModel
     let item: CaptureItem
     let index: Int
     let isSelected: Bool
-    let image: NSImage?
+    @State private var loaded: NSImage?
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.item == rhs.item && lhs.index == rhs.index && lhs.isSelected == rhs.isSelected
+    }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -114,14 +151,20 @@ private struct ClipboardRow: View {
         .frame(maxHeight: .infinity)
         .foregroundStyle(isSelected ? Color.white : Color.primary)
         .background(isSelected ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+        .task(id: item.contentHash) {
+            if item.fileName != nil { loaded = await model.thumbnail(for: item) }
+        }
     }
 
     @ViewBuilder private var content: some View {
-        if let image {
-            Image(nsImage: image)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: 200, maxHeight: Metrics.imageRowHeight - 10, alignment: .leading)
+        if item.fileName != nil {
+            // Empty until the thumbnail is decoded in the background.
+            if let image = model.cachedThumbnail(for: item) ?? loaded {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 200, maxHeight: Metrics.imageRowHeight - 10, alignment: .leading)
+            }
         } else {
             Text(Self.preview(item.text ?? ""))
                 .lineLimit(1)
@@ -164,6 +207,7 @@ private struct FooterRow: View {
 struct ClipboardPreview: View {
     let item: CaptureItem
     let image: NSImage?
+    let appIcon: NSImage?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -171,11 +215,11 @@ struct ClipboardPreview: View {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFit()
-                    .frame(maxWidth: 480, maxHeight: 360, alignment: .leading)
+                    .frame(maxWidth: Metrics.previewMaxWidth, maxHeight: Metrics.previewMaxHeight, alignment: .leading)
             } else {
                 Text(String((item.text ?? "").prefix(3000)))
                     .lineLimit(24)
-                    .frame(maxWidth: 480, alignment: .leading)
+                    .frame(maxWidth: Metrics.previewMaxWidth, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Divider()
@@ -201,12 +245,5 @@ struct ClipboardPreview: View {
         .font(.system(size: 13))
         .padding(16)
         .fixedSize()
-    }
-
-    private var appIcon: NSImage? {
-        guard let bundleID = item.sourceBundleID,
-              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
-        else { return nil }
-        return NSWorkspace.shared.icon(forFile: url.path)
     }
 }

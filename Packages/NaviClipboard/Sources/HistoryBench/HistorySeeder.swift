@@ -14,6 +14,11 @@ enum HistorySeeder {
         "panel", "markup", "overlay", "capture", "history", "search", "paste", "folder", "version", "summary",
     ]
     static let rareWord = "quartz"
+    static let accentedVocabulary = [
+        "ação", "informação", "reunião", "não", "São", "Paulo", "configuração", "título", "área", "você",
+        "também", "até", "versão", "é", "às", "opção", "atenção", "câmera", "médico", "coração",
+        "Reunião", "avaliação", "prática", "número", "histórico", "só", "relatório", "orçamento", "ênfase", "atenção",
+    ]
     static let sourceApps = ["Safari", "Notes", "Xcode", "Mail", "Terminal"]
     /// Two large and two small pictures, rendered once and reused for every image item.
     static let pictureSizes = [
@@ -25,7 +30,7 @@ enum HistorySeeder {
     static let firstDate = Date(timeIntervalSince1970: 1_767_225_600)
 
     /// Writes `count` items into `directory`, with the same content for the same seed.
-    static func write(count: Int, seed: UInt64, to directory: URL) throws {
+    static func write(count: Int, seed: UInt64, corpus: Corpus = .ascii, to directory: URL) throws {
         var random = LCG(seed: seed)
         let files = directory.appending(path: "files", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: files, withIntermediateDirectories: true)
@@ -48,7 +53,7 @@ enum HistorySeeder {
                     text: nil, fileName: name, sourceApp: app, sourceBundleID: nil, contentHash: hash(picture)
                 ))
             } else {
-                let text = makeText(index: index, &random)
+                let text = makeText(for: corpus, index: index, &random)
                 items.append(CaptureItem(
                     id: id, kind: .text, createdAt: date, lastUsedAt: date, copyCount: 1 + random.below(5),
                     pinned: false, text: text, fileName: nil, sourceApp: app, sourceBundleID: nil,
@@ -57,6 +62,40 @@ enum HistorySeeder {
             }
         }
         try JSONEncoder().encode(items).write(to: directory.appending(path: "history.json"))
+    }
+
+    /// One word list per script for the `mixed` corpus.
+    static let mixedVocabularies: [[String]] = [
+        accentedVocabulary,
+        ["привет", "мир", "отчёт", "проект", "встреча", "бюджет", "клиент", "сервер", "резервная", "копия", "окно",
+         "панель", "история", "поиск", "файл", "таблица", "команда", "срок", "договор", "поездка"],
+        ["日本語", "テキスト", "報告書", "会議", "予算", "設計", "確認", "メモ", "草稿", "顧客", "更新", "計画", "出張",
+         "昼食", "契約", "画面", "履歴", "検索", "貼り付け", "フォルダ"],
+        ["مرحبا", "العالم", "تقرير", "مَرْحَبًا", "اجتماع", "ميزانية", "عميل", "خادم", "نسخة", "احتياطية", "نافذة", "لوحة",
+         "سجل", "بحث", "ملف", "جدول", "فريق", "موعد", "عقد", "رحلة"],
+        ["नमस्ते", "दुनिया", "रिपोर्ट", "परियोजना", "बैठक", "बजट", "ग्राहक", "सर्वर", "बैकअप", "खिड़की", "पैनल", "इतिहास", "खोज",
+         "फ़ाइल", "तालिका", "टीम", "अनुबंध", "यात्रा", "संस्करण", "सारांश"],
+        ["😀", "👍", "🎉", "🔥", "✅", "📎", "📷", "💡", "🚀", "❤️", "👨‍👩‍👧", "🇧🇷", "👍🏽", "😂", "🙏"],
+    ]
+
+    private static func makeText(for corpus: Corpus, index: Int, _ random: inout LCG) -> String {
+        switch corpus {
+        case .ascii: makeText(index: index, &random)
+        case .mixed: makeMixedText(index: index, &random)
+        }
+    }
+
+    private static func makeMixedText(index: Int, _ random: inout LCG) -> String {
+        let words = mixedVocabularies[random.below(mixedVocabularies.count)]
+        let target = 20 + random.below(3981)
+        var text = "#\(index)"
+        var length = text.count
+        while length < target {
+            let word = words[random.below(words.count)]
+            text += " " + word
+            length += word.count + 1
+        }
+        return text
     }
 
     /// A text item of 20 to 4000 characters, starting with its index so no two items match.

@@ -7,6 +7,7 @@ struct BenchOptions {
     var seed: UInt64 = 42
     var save = false
     var json = false
+    var corpus = Corpus.ascii
 
     init(arguments: [String]) throws {
         var remaining = arguments[...]
@@ -20,6 +21,12 @@ struct BenchOptions {
                 let text = try Self.value(flag, &remaining)
                 guard let number = UInt64(text) else { throw BenchError.usage("--seed needs a whole number, got \(text)") }
                 seed = number
+            case "--corpus":
+                let text = try Self.value(flag, &remaining)
+                guard let chosen = Corpus(rawValue: text) else {
+                    throw BenchError.usage("--corpus needs ascii or mixed, got \(text)")
+                }
+                corpus = chosen
             case "--save": save = true
             case "--json": json = true
             default: throw BenchError.usage("unknown option \(flag)")
@@ -40,18 +47,21 @@ struct BenchOptions {
     }
 }
 
+enum Corpus: String {
+    case ascii
+    case mixed
+}
+
 /// Errors that stop the benchmark with a message.
 enum BenchError: Error, CustomStringConvertible {
     case usage(String)
     case render
-    case noImages
     case seeding(expected: Int, found: Int)
 
     var description: String {
         switch self {
         case .usage(let message): message
         case .render: "could not render a test picture"
-        case .noImages: "the seeded history has no image items"
         case .seeding(let expected, let found): "seeded \(found) items, expected \(expected)"
         }
     }
