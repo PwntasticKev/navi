@@ -1,53 +1,47 @@
 #!/bin/zsh
-# Publishes a new Navi version on GitHub Releases. Friends' copies update through Sparkle.
+# Starts a Navi release on GitHub now, instead of waiting for the nightly run, and follows it.
 #
-#   scripts/release.sh 0.2.0 "What changed, in a sentence or two."
+#   scripts/release.sh                     # next patch version, notes from the commits since the last release
+#   scripts/release.sh 0.3.0 "What changed, in a sentence or two."
 #
-# It sets the version in project.yml (and adds 1 to the build number), runs scripts/share.sh
-# (build, Developer ID, notarize), signs the update with the Sparkle key in your keychain,
-# writes appcast.xml, and makes the GitHub release vX.Y.Z with Navi.zip and appcast.xml.
+# GitHub builds origin/main, so push your work first. The Release workflow
+# (.github/workflows/release.yml) plans the version (scripts/release-plan.sh), then tests, builds,
+# signs with Developer ID, notarizes, signs the update with the Sparkle key, and makes the GitHub
+# release vX.Y.Z with Navi.zip and appcast.xml (scripts/ci-release.sh). Nothing is committed.
+#
+# One-time setup of the GitHub secrets: scripts/release-secrets.sh.
 #
 # Links that always point at the newest version:
 #   https://github.com/donovanhiland/navi/releases/latest/download/Navi.zip   (send this to friends)
 #   https://github.com/donovanhiland/navi/releases/latest/download/appcast.xml (Navi checks this)
 set -euo pipefail
 
-version=${1:?Usage: scripts/release.sh <version> [notes]}
-notes=${2:-"Navi $version"}
+version=${1:-}
+notes=${2:-}
 root=${0:A:h:h}
 cd "$root"
 repo=donovanhiland/navi
-tag="v$version"
 
-if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
-  echo "Release $tag already exists." >&2
+git fetch -q origin main --tags
+if [[ -n $(git log --oneline origin/main..main 2>/dev/null) ]]; then
+  print -u2 "Your main has commits that are not on GitHub. Push them first, or they are not in the release."
   exit 1
 fi
+# The same plan the workflow makes, so a bad version stops here.
+git -c advice.detachedHead=false worktree add -q --detach "${TMPDIR:-/tmp}/navi-plan.$$" origin/main
+trap 'git worktree remove --force "${TMPDIR:-/tmp}/navi-plan.$$"' EXIT
+(cd "${TMPDIR:-/tmp}/navi-plan.$$" && scripts/release-plan.sh "$version" "$notes") | sed -n '1,2p'
 
-build=$(sed -n 's/^ *CURRENT_PROJECT_VERSION: "\{0,1\}\([0-9]*\)"\{0,1\}$/\1/p' project.yml)
-next=$((build + 1))
-sed -i '' -E "s/^( *MARKETING_VERSION: ).*/\1\"$version\"/; s/^( *CURRENT_PROJECT_VERSION: ).*/\1\"$next\"/" project.yml
-echo "› Version $version (build $next)"
+before=$(gh run list --repo "$repo" --workflow release.yml -L 1 --json databaseId -q '.[0].databaseId // 0')
+gh workflow run release.yml --repo "$repo" --ref main -f version="$version" -f notes="$notes"
+print "› Waiting for GitHub to start the run"
+run=$before
+for _ in {1..30}; do
+  run=$(gh run list --repo "$repo" --workflow release.yml -L 1 --json databaseId -q '.[0].databaseId // 0')
+  [[ $run != $before ]] && break
+  sleep 2
+done
+[[ $run != $before ]] || { print -u2 "The run did not start. See https://github.com/$repo/actions"; exit 1 }
 
-scripts/share.sh
-
-echo "› Signing the update and writing appcast.xml"
-out="$root/dist/release"
-rm -rf "$out"
-mkdir -p "$out"
-cp dist/Navi.zip "$out/Navi.zip"
-print -r -- "<p>$notes</p>" > "$out/Navi.html"   # generate_appcast uses this as the release notes
-xcodegen generate >/dev/null
-xcodebuild -resolvePackageDependencies -project Navi.xcodeproj -scheme Navi -derivedDataPath build.noindex -quiet
-build.noindex/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast \
-  --download-url-prefix "https://github.com/$repo/releases/download/$tag/" \
-  --embed-release-notes "$out"
-
-echo "› Publishing $tag"
-gh release create "$tag" "$out/Navi.zip" "$out/appcast.xml" --repo "$repo" \
-  --title "Navi $version" --notes "$notes
-
-Download: https://github.com/$repo/releases/latest/download/Navi.zip
-Unzip, move Navi to Applications, and open it. After that, Navi updates itself."
-
-echo "Done: https://github.com/$repo/releases/tag/$tag"
+gh run watch "$run" --repo "$repo" --exit-status
+print "Done: https://github.com/$repo/releases/latest"

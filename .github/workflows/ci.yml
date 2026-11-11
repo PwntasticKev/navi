@@ -1,0 +1,100 @@
+# Checks every pull request and every push to main. Make "Check" the one required status check:
+# it fails when any job above it failed or was cancelled, so a skipped job cannot pass by accident.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test packages
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test every package
+        run: |
+          xcodebuild -version
+          for package in Packages/*/; do
+            [ -d "$package/Tests" ] || continue
+            echo "› ${package}"
+            (cd "$package" && swift test)
+          done
+
+  build:
+    name: Build app
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build Navi Dev (Debug, unsigned)
+        run: |
+          brew install xcodegen
+          xcodegen generate
+          xcodebuild -project Navi.xcodeproj -scheme Navi -configuration Debug \
+            -derivedDataPath build.noindex -quiet build CODE_SIGNING_ALLOWED=NO
+
+  release-dry-run:
+    name: Release dry run
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Plan
+        id: plan
+        run: scripts/release-plan.sh 999.0.0 "Dry run"
+      - name: Archive, check the app, write and check the update feed
+        # The release steps without Apple keys: ad hoc signature, no notarization, a throwaway
+        # Sparkle key, nothing published. The packages are tested in the job above.
+        env:
+          MODE: dry-run
+          SKIP_TESTS: "1"
+          VERSION: ${{ steps.plan.outputs.version }}
+          BUILD: ${{ steps.plan.outputs.build }}
+          NOTES: ${{ steps.plan.outputs.notes }}
+        run: |
+          brew install xcodegen
+          scripts/ci-release.sh
+      - name: Signature checker tests
+        run: bash scripts/tests/sparkle-check.test.sh
+
+  script-tests:
+    name: Release script tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Lint and test
+        run: |
+          shellcheck -x -P SCRIPTDIR scripts/release-plan.sh scripts/release-notes-html.sh scripts/tests/*.sh
+          scripts/tests/run.sh
+          scripts/release-plan.sh
+
+  check:
+    name: Check
+    if: always()
+    needs: [test, build, release-dry-run, script-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All jobs passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Results: $RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = success ] || { echo "A job did not pass."; exit 1; }
+          done

@@ -141,7 +141,7 @@ struct FrameAdjustDemoTests {
     }
 
     private static func view(model: AnnotateModel, backdrop: CGImage, reveal: CGFloat) -> InPlaceAnnotateView {
-        InPlaceAnnotateView(model: model, backdrop: backdrop, area: area, onDone: {}, onCancel: {}, revealOverride: reveal)
+        InPlaceAnnotateView(model: model, backdrop: backdrop, area: area, onDone: {}, onSave: {}, onStash: {}, onCancel: {}, revealOverride: reveal)
     }
 
     private static func writeFrame(view: NSView, cursor point: CGPoint, image cursor: NSCursor, to url: URL) throws {

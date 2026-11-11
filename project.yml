@@ -7,8 +7,13 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
+    # Local builds only. Releases set the version and build number from the tag and the
+    # commit count (scripts/release-plan.sh).
     MARKETING_VERSION: "0.2.0"
     CURRENT_PROJECT_VERSION: "3"
+    # Sparkle's public EdDSA key. Navi installs only updates signed with its private half.
+    # The CI release dry run swaps in a throwaway key on the command line.
+    SPARKLE_PUBLIC_KEY: X+a0pYYK9iXdbzkPar690FFC21oqmzJn+f3Ne40NtOE=
 packages:
   NaviCore:
     path: Packages/NaviCore
@@ -43,7 +48,7 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         SUFeedURL: https://github.com/donovanhiland/navi/releases/latest/download/appcast.xml
         SUEnableAutomaticChecks: true
-        SUPublicEDKey: X+a0pYYK9iXdbzkPar690FFC21oqmzJn+f3Ne40NtOE=
+        SUPublicEDKey: $(SPARKLE_PUBLIC_KEY)
         LSUIElement: true
         LSApplicationCategoryType: public.app-category.productivity
         NSMicrophoneUsageDescription: Navi uses the microphone for talk to type, and for your voice in screen recordings.
