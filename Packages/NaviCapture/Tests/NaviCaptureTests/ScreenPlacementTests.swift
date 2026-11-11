@@ -31,6 +31,23 @@ import Testing
         #expect(handle(330, 150) == nil)
     }
 
+    @Test @MainActor func theMoveTabStaysClearOfTheTopEdge() {
+        let frame = CGRect(x: 200, y: 300, width: 400, height: 200)
+        let tab = FrameAdjuster.moveTabZone(of: frame)
+        #expect(tab.maxY < frame.minY - FrameAdjuster.grab)
+        #expect(tab.midX == frame.midX)
+        // The middle of the top edge resizes, it does not move.
+        #expect(CaptureGeometry.frameHandle(of: frame, near: CGPoint(x: frame.midX, y: frame.minY - 3), tolerance: FrameAdjuster.grab) == .top)
+        #expect(!tab.contains(CGPoint(x: frame.midX, y: frame.minY - FrameAdjuster.grab)))
+    }
+
+    @Test @MainActor func theMoveTabGoesInsideAtTheTopOfTheScreen() {
+        let frame = CGRect(x: 200, y: 10, width: 400, height: 200)
+        let tab = FrameAdjuster.moveTabZone(of: frame)
+        #expect(tab.minY > frame.minY + 4)
+        #expect(tab.maxY < frame.maxY)
+    }
+
     @Test func draggingAHandleMovesOnlyItsEdges() {
         let bounds = CGRect(x: 0, y: 0, width: 1000, height: 800)
         let resize = { (handle: CaptureGeometry.FrameHandle, x: CGFloat, y: CGFloat) in

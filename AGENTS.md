@@ -148,9 +148,10 @@ video editor.
   with the toolbar floating below it (above it near the bottom, inside it when
   it fills the screen). No window or title bar. The frame can still be
   fixed (`Annotate/FrameAdjuster.swift`): soft corner brackets sit just
-  outside it; near the frame they grow and edge ticks, a move grip on the top
-  edge, and the pixel size fade in. Drag an edge or corner to resize, the grip
-  to move; the shot is cut again from the frozen screen and the marks stay on
+  outside it; near the frame they grow, ticks show on all four edges, and a
+  move tab (move icon and pixel size) fades in above the frame, apart from the
+  top edge (inside it at the top of the screen). Drag any edge or corner to
+  resize, the tab to move; the shot is cut again from the frozen screen and the marks stay on
   their pixels (`ScreenPlacement`). One undo puts a whole drag back. A crop
   keeps the kept pixels in place; rotate, flip, or resize lock the frame. The
   dim outside is 0.42. Return or Copy copies the

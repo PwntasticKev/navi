@@ -254,13 +254,17 @@ struct InPlaceAnnotateView: View {
 
     /// Grows the brackets while the pointer is near the frame line or a drag is on.
     private func updateReveal(hole: CGRect) {
-        let near = pointer.map { point in
-            hole.insetBy(dx: -Self.revealDistance, dy: -Self.revealDistance).contains(point)
-                && !hole.insetBy(dx: Self.revealDistance, dy: Self.revealDistance).contains(point)
-        } ?? false
+        let near = pointer.map { Self.isNearFrame($0, hole: hole) } ?? false
         let target: CGFloat = isDraggingFrame || near ? 1 : 0
         guard target != reveal else { return }
         withAnimation(.easeOut(duration: 0.18)) { reveal = target }
+    }
+
+    /// Within `revealDistance` of the frame line, or over the move tab.
+    static func isNearFrame(_ point: CGPoint, hole: CGRect) -> Bool {
+        let nearLine = hole.insetBy(dx: -revealDistance, dy: -revealDistance).contains(point)
+            && !hole.insetBy(dx: revealDistance, dy: revealDistance).contains(point)
+        return nearLine || FrameAdjuster.moveTabZone(of: hole).insetBy(dx: -4, dy: -4).contains(point)
     }
 
     /// Clicks on the dim do nothing, so a stray click cannot lose the marks.

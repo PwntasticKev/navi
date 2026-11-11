@@ -37,10 +37,14 @@ struct FrameAdjustDemoTests {
         Step(to: CGPoint(x: 862, y: 462), seconds: 0.5),
         Step(to: CGPoint(x: 1010, y: 560), seconds: 1.0, drag: .handle(.bottomRight)),
         Step(to: CGPoint(x: 1010, y: 560), seconds: 0.5),
-        Step(to: CGPoint(x: 720, y: 198), seconds: 0.7),
-        Step(to: CGPoint(x: 720, y: 198), seconds: 0.4),
-        Step(to: CGPoint(x: 630, y: 138), seconds: 1.0, drag: .grip),
-        Step(to: CGPoint(x: 630, y: 138), seconds: 0.5),
+        Step(to: CGPoint(x: 720, y: 186), seconds: 0.7),
+        Step(to: CGPoint(x: 720, y: 186), seconds: 0.4),
+        Step(to: CGPoint(x: 630, y: 126), seconds: 1.0, drag: .grip),
+        Step(to: CGPoint(x: 630, y: 126), seconds: 0.5),
+        Step(to: CGPoint(x: 630, y: 151), seconds: 0.5),
+        Step(to: CGPoint(x: 630, y: 151), seconds: 0.4),
+        Step(to: CGPoint(x: 630, y: 90), seconds: 0.8, drag: .handle(.top)),
+        Step(to: CGPoint(x: 630, y: 90), seconds: 0.5),
         Step(to: CGPoint(x: 341, y: 325), seconds: 0.6),
         Step(to: CGPoint(x: 341, y: 325), seconds: 0.3),
         Step(to: CGPoint(x: 400, y: 325), seconds: 0.7, drag: .handle(.left)),
@@ -98,9 +102,9 @@ struct FrameAdjustDemoTests {
         return false
     }
 
-    /// The live view's rule: grow while within 24 pt of the line or dragging, over 0.18 s.
+    /// The live view's rule: grow while near the line or the move tab, or dragging, over 0.18 s.
     private static func nextReveal(_ reveal: CGFloat, hole: CGRect, cursor: CGPoint, dragging: Bool) -> CGFloat {
-        let near = hole.insetBy(dx: -24, dy: -24).contains(cursor) && !hole.insetBy(dx: 24, dy: 24).contains(cursor)
+        let near = InPlaceAnnotateView.isNearFrame(cursor, hole: hole)
         let target: CGFloat = dragging || near ? 1 : 0
         let step = CGFloat(1 / (0.18 * fps))
         return target > reveal ? min(target, reveal + step) : max(target, reveal - step)
@@ -111,7 +115,8 @@ struct FrameAdjustDemoTests {
         case let .handle(handle): return FrameAdjuster.cursor(for: handle)
         case .grip: return .closedHand
         case .none:
-            if abs(point.x - hole.midX) < 18, abs(point.y - (hole.minY - 12)) < 8 { return .openHand }
+            let tab = FrameAdjuster.moveTabZone(of: hole)
+            if abs(point.x - tab.midX) < 40, abs(point.y - tab.midY) < tab.height / 2 { return .openHand }
             if let handle = CaptureGeometry.frameHandle(of: hole, near: point, tolerance: FrameAdjuster.grab) {
                 return FrameAdjuster.cursor(for: handle)
             }
