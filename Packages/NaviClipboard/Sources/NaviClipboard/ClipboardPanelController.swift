@@ -26,6 +26,9 @@ final class ClipboardPanelController {
     private var topLeft: CGPoint = .zero
     private var screenFrame: CGRect = .zero
 
+    /// ⌘E on an image: mark it up. The panel closes first.
+    var onAnnotate: ((CaptureItem) -> Void)?
+
     init(model: ClipboardModel, onChoose: @escaping (CaptureItem) -> Void) {
         self.model = model
         self.onChoose = onChoose
@@ -268,6 +271,12 @@ final class ClipboardPanelController {
             return true
         case 51 where flags == [.option, .command]: // Option-Command-Delete
             model.clear()
+            return true
+        case 14 where flags == .command: // Command-E
+            if let item = model.selectedItem, item.kind.isImage, let onAnnotate {
+                hide()
+                onAnnotate(item)
+            }
             return true
         case 12 where flags == .command: // Command-Q
             NSApp.terminate(nil)

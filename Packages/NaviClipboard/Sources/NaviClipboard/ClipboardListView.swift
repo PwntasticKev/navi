@@ -238,6 +238,7 @@ struct ClipboardPreview: View {
                 Text("Number of copies: \(item.copyCount)")
             }
             VStack(alignment: .leading, spacing: 2) {
+                if item.kind.isImage { Text("Press ⌘E to mark up.") }
                 Text("Press ⌥P to (un)pin.")
                 Text("Press ⌥⌫ to delete.")
             }

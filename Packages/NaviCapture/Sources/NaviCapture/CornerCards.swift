@@ -128,6 +128,11 @@ final class CardStack {
 
     /// Each card remembers its display, so cards stay where they were captured.
     private var entries: [(card: Card, panel: NSPanel, screen: NSScreen?)] = []
+
+    /// The open card for a history item, if there is one.
+    func card(forInboxID id: UUID) -> Card? {
+        entries.first { $0.card.inboxID == id }?.card
+    }
     private var timers: [UUID: Timer] = [:]
     private var hovered: Set<UUID> = []
     /// ⌘C, ⌘S, and ⌘W for the card under the mouse. They exist only while the mouse is on a card,

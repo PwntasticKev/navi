@@ -184,7 +184,10 @@ video editor.
   or Close All Cards (menu, or right-click a card). Cards slide in with a small
   bounce. A fullscreen capture shows the shot and closes it, so macOS plays the
   same shrink as the area overlay. No shutter sound.
-- No Restore Closed Card. A closed shot stays in `⇧⌘V` history.
+- No Restore Closed Card. A closed shot stays in `⇧⌘V` history. `⌘E` on an
+  image in that list opens the markup editor (saved marks stay editable); Done
+  updates the history item and its open card. `NaviClipboard` reaches capture
+  only through `ClipboardFeature.onAnnotate`, wired in the app.
 - `⌥⇧⌘N` opens the Navi menu at the mouse. The same menu shows from the
   menu bar icon. It is an AppKit `NSStatusItem` menu, built in `NaviMenu`.
 - Navi marks its own pasteboard writes with `NaviPasteboard.ownType`, so the

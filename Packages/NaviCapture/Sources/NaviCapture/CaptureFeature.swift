@@ -484,6 +484,41 @@ public final class CaptureFeature {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
+    /// Opens the markup editor for an image in the history (⌘E in the ⇧⌘V list). Marks from an
+    /// earlier edit stay editable. Done updates the history item and its open card, if any.
+    public func annotate(inboxID id: UUID) {
+        if let card = cards.card(forInboxID: id) {
+            annotate(card)
+            return
+        }
+        guard let data = inbox.fileData(for: id),
+              let bitmap = NSBitmapImageRep(data: data), let flat = bitmap.cgImage
+        else { return }
+        let scale = bitmap.size.width > 0 ? CGFloat(bitmap.pixelsWide) / bitmap.size.width : 1
+        var base = flat
+        var document = AnnotationDocument()
+        if let saved = MarkupStore.load(from: inbox.markupURL(for: id)) { (base, document) = saved }
+        let token = UUID()
+        let editor = AnnotateEditor(base: base, document: document, scale: scale) { [weak self] result in
+            self?.applyMarkup(result, toInboxID: id)
+        } onClose: { [weak self] in
+            self?.editors[token] = nil
+        }
+        editors[token] = editor
+        editor.show()
+    }
+
+    private func applyMarkup(_ result: AnnotateEditor.Result, toInboxID id: UUID) {
+        guard let png = ImageOps.png(result.flat, pointSize: result.pointSize) else { return }
+        if settings.copyToClipboard { NaviPasteboard.write(image: Self.image(result.flat, pointSize: result.pointSize)) }
+        inbox.updateFile(id, data: png)
+        do {
+            try MarkupStore.save(base: result.base, document: result.document, to: inbox.markupURL(for: id))
+        } catch {
+            logger.error("Could not save the markup: \(error.localizedDescription)")
+        }
+    }
+
     /// Opens the markup editor. Marks from an earlier edit stay editable.
     private func annotate(_ card: Card) {
         guard let current = card.cgImage else { return }

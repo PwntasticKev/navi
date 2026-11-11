@@ -45,7 +45,7 @@ Navi is all four in one app:
 Keyboard first, like Maccy.
 
 - `⇧⌘V` opens your history at the mouse. Type to filter, then press Return to paste.
-- `⌘1`–`⌘9` paste the top items. `⌥P` pins an item, `⌥⌫` deletes it.
+- `⌘1`–`⌘9` paste the top items. `⌥P` pins an item, `⌥⌫` deletes it, `⌘E` marks up an image.
 - Images, files, screenshots, recordings, and dictated text live in the same list.
 - Skips anything a password manager marks as private.
 
