@@ -38,6 +38,51 @@ public enum CaptureGeometry {
         return corners.first { hypot($0.0.x - point.x, $0.0.y - point.y) <= tolerance }?.1
     }
 
+    /// A part of a frame that resizes it when dragged. Top-left space: `top` is `minY`.
+    public enum FrameHandle: Sendable, CaseIterable {
+        case top, bottom, left, right, topLeft, topRight, bottomLeft, bottomRight
+
+        var movesLeft: Bool { self == .left || self == .topLeft || self == .bottomLeft }
+        var movesRight: Bool { self == .right || self == .topRight || self == .bottomRight }
+        var movesTop: Bool { self == .top || self == .topLeft || self == .topRight }
+        var movesBottom: Bool { self == .bottom || self == .bottomLeft || self == .bottomRight }
+    }
+
+    /// The handle under `point`, in top-left space: a corner when it is near two edges, else an edge
+    /// within `tolerance` of the line (on either side). Nil inside the frame or away from it.
+    public static func frameHandle(of rect: CGRect, near point: CGPoint, tolerance: CGFloat) -> FrameHandle? {
+        let grab = rect.insetBy(dx: -tolerance, dy: -tolerance)
+        guard grab.contains(point) else { return nil }
+        let left = abs(point.x - rect.minX) <= tolerance
+        let right = !left && abs(point.x - rect.maxX) <= tolerance
+        let top = abs(point.y - rect.minY) <= tolerance
+        let bottom = !top && abs(point.y - rect.maxY) <= tolerance
+        switch (left, right, top, bottom) {
+        case (true, _, true, _): return .topLeft
+        case (true, _, _, true): return .bottomLeft
+        case (_, true, true, _): return .topRight
+        case (_, true, _, true): return .bottomRight
+        case (true, _, _, _): return .left
+        case (_, true, _, _): return .right
+        case (_, _, true, _): return .top
+        case (_, _, _, true): return .bottom
+        default: return nil
+        }
+    }
+
+    /// `rect` with the edges of `handle` moved to `point`, in top-left space. Each moved edge stops
+    /// at `bounds` and `minSize` from the opposite edge, so the frame never flips or leaves the screen.
+    public static func resized(
+        _ rect: CGRect, handle: FrameHandle, to point: CGPoint, within bounds: CGRect, minSize: CGFloat
+    ) -> CGRect {
+        var minX = rect.minX, maxX = rect.maxX, minY = rect.minY, maxY = rect.maxY
+        if handle.movesLeft { minX = min(max(point.x, bounds.minX), maxX - minSize) }
+        if handle.movesRight { maxX = max(min(point.x, bounds.maxX), minX + minSize) }
+        if handle.movesTop { minY = min(max(point.y, bounds.minY), maxY - minSize) }
+        if handle.movesBottom { maxY = max(min(point.y, bounds.maxY), minY + minSize) }
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
     /// The pixel rect in a screen image for a selection in view-local points.
     /// The result is whole pixels and stays inside the image.
     public static func pixelRect(forSelection selection: CGRect, viewSize: CGSize, imageSize: CGSize) -> CGRect {
