@@ -6,9 +6,10 @@ set -euo pipefail
 
 in_list=0
 while IFS= read -r line || [[ -n $line ]]; do
-  line=${line//&/&amp;}
-  line=${line//</&lt;}
-  line=${line//>/&gt;}
+  # Quoted replacements: in bash 5.2+ an unquoted & means "the matched text".
+  line=${line//&/"&amp;"}
+  line=${line//</"&lt;"}
+  line=${line//>/"&gt;"}
   if [[ $line == '- '* ]]; then
     (( in_list )) || echo "<ul>"
     in_list=1
