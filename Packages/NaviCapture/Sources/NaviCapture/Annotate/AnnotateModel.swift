@@ -272,11 +272,29 @@ final class AnnotateModel {
         render()
     }
 
+    /// What the pointer shows over the image. Kept apart from `NSCursor` so tests can check it
+    /// without a running app.
+    enum Pointer: Equatable {
+        case arrow, openHand, closedHand, iBeam, crosshair
+        case resize(NSCursor.FrameResizePosition)
+
+        var cursor: NSCursor {
+            switch self {
+            case .arrow: .arrow
+            case .openHand: .openHand
+            case .closedHand: .closedHand
+            case .iBeam: .iBeam
+            case .crosshair: .crosshair
+            case let .resize(position): .frameResize(position: position, directions: .all)
+            }
+        }
+    }
+
     /// The pointer for a spot on the image: resize arrows over a handle, a hand over a mark
     /// you can move, a crosshair for drawing.
-    func cursor(at point: CGPoint) -> NSCursor {
+    func pointer(at point: CGPoint) -> Pointer {
         if let mark = selectedMark, let handle = mark.handle(at: point, tolerance: 10 * scale) {
-            return Self.resizeCursor(handle, of: mark)
+            return Self.resizePointer(handle, of: mark)
         }
         switch tool {
         case .select:
@@ -288,24 +306,39 @@ final class AnnotateModel {
         }
     }
 
-    private static func resizeCursor(_ handle: Annotation.Handle, of mark: Annotation) -> NSCursor {
+    /// The pointer while a drag is under way: the arrows of the handle being dragged, a closed
+    /// hand while moving a mark, a crosshair while drawing or cropping. Hover events stop during a
+    /// drag, so without this the pointer kept whatever it showed before the press.
+    func dragPointer(at point: CGPoint) -> Pointer {
+        if let resizing, let mark = selectedMark { return Self.resizePointer(resizing, of: mark) }
+        if dragOrigin != nil { return .closedHand }
+        if draft != nil || (tool == .crop && cropRect != nil) { return .crosshair }
+        return pointer(at: point)
+    }
+
+    /// The pointer for where the mouse is now, or nil while it is off the image. Used after the
+    /// tool or the selection changes without the mouse moving.
+    var hoverPointer: Pointer? {
+        hoverPoint.map(pointer(at:))
+    }
+
+    private static func resizePointer(_ handle: Annotation.Handle, of mark: Annotation) -> Pointer {
         switch handle {
-        case .top: return .frameResize(position: .top, directions: .all)
-        case .bottom: return .frameResize(position: .bottom, directions: .all)
-        case .left: return .frameResize(position: .left, directions: .all)
-        case .right: return .frameResize(position: .right, directions: .all)
+        case .top: return .resize(.top)
+        case .bottom: return .resize(.bottom)
+        case .left: return .resize(.left)
+        case .right: return .resize(.right)
         default:
             guard mark.isBox else { return .crosshair }
             let point = mark.point(of: handle)
             let box = mark.box
             let top = point.y <= box.midY, left = point.x <= box.midX
-            let position: NSCursor.FrameResizePosition = switch (top, left) {
-            case (true, true): .topLeft
-            case (true, false): .topRight
-            case (false, true): .bottomLeft
-            case (false, false): .bottomRight
+            return switch (top, left) {
+            case (true, true): .resize(.topLeft)
+            case (true, false): .resize(.topRight)
+            case (false, true): .resize(.bottomLeft)
+            case (false, false): .resize(.bottomRight)
             }
-            return .frameResize(position: position, directions: .all)
         }
     }
 
