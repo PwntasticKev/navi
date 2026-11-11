@@ -52,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // First launch (or no access yet): macOS asks for Screen Recording and lists Navi in Settings.
         if !CaptureFeature.hasScreenAccess { CaptureFeature.requestScreenAccess(openSettings: false) }
         clipboard.start()
+        clipboard.onAnnotate = { [weak self] item in self?.capture.annotate(inboxID: item.id) }
         _ = naviMenu
         registerHotKeys()
         quitCleanlyOnSignals()

@@ -60,7 +60,10 @@ Desktop Icons). Not checked yet: the `⌥⇧⌘N` menu and a second display.
   so there is no mic dot between dictations; a press only starts it. "Keep
   Microphone Ready" (menu, off by default; Hex's "Keep ready") keeps the mic
   open with a 450 ms pre-roll, so a press records at once (macOS shows the mic
-  dot). Recording runs 200 ms past the release so
+  dot). The mic is an input-only AUHAL unit on the default input, like Hex
+  (cpal). Not `AVAudioEngine`: it joins the mic and the speakers in a hidden
+  aggregate device, which changes music and cuts it out when it stops.
+  Recording runs 200 ms past the release so
   the last word is kept. The cleanup model session is pre-warmed. Timings log
   under the `Dictation` category ("Release to text: … ms"). fn with another key (fn+⌫,
   fn+arrows) never dictates. The first launch asks before it uses fn. When on,
@@ -127,7 +130,10 @@ video editor.
   mouse without activating Navi, so an open markup editor is not raised.
 - The selection overlay shows at once over the live screen. The frozen screen
   images arrive about 0.2 s later and are what gets cropped; a selection that
-  ends first waits for them.
+  ends first waits for them, off screen. The overlay leaves the screen on mouse
+  up. The frozen image is the overlay's layer content (GPU), and the hint pill
+  shows at once at the mouse. PNG encoding runs off the main thread; the card
+  draws a small thumbnail. The time logs under `Capture` ("Capture to card").
 - Screen Recording is requested at launch through ScreenCaptureKit
   (`SCShareableContent`), which lists Navi in System Settings, switched off, so
   users only flip the switch.
@@ -148,7 +154,10 @@ video editor.
   with the toolbar floating below it (above it near the bottom, inside it when
   it fills the screen). No window or title bar. Return or Copy copies the
   marked-up shot, adds it to the history with its marks, and shows "Copied";
-  no corner card. Esc or Cancel drops the shot. While typing text or cropping,
+  no corner card. Save (`⌘S`) writes it to the save folder and shows "Saved".
+  Stash only keeps it in the history and shows "Stashed". Both add it to the
+  history and do not copy. Esc or Cancel drops the shot, with no close animation (the
+  selection overlay's Esc too). While typing text or cropping,
   Return and Esc end that first. Every editor key (tool letters, `⌘Z`, Delete)
   works. The window editor and this one share `AnnotateToolbar`,
   `AnnotateCanvas`, and `AnnotateKeys`.
@@ -175,7 +184,10 @@ video editor.
   or Close All Cards (menu, or right-click a card). Cards slide in with a small
   bounce. A fullscreen capture shows the shot and closes it, so macOS plays the
   same shrink as the area overlay. No shutter sound.
-- No Restore Closed Card. A closed shot stays in `⇧⌘V` history.
+- No Restore Closed Card. A closed shot stays in `⇧⌘V` history. `⌘E` on an
+  image in that list opens the markup editor (saved marks stay editable); Done
+  updates the history item and its open card. `NaviClipboard` reaches capture
+  only through `ClipboardFeature.onAnnotate`, wired in the app.
 - `⌥⇧⌘N` opens the Navi menu at the mouse. The same menu shows from the
   menu bar icon. It is an AppKit `NSStatusItem` menu, built in `NaviMenu`.
 - Navi marks its own pasteboard writes with `NaviPasteboard.ownType`, so the

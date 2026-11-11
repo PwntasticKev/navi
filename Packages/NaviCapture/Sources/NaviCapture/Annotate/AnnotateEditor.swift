@@ -107,6 +107,9 @@ struct AnnotateToolbar: View {
     var doneModifiers: EventModifiers? = .command
     /// The small picture to drag into other apps. Off when a full-screen overlay covers them.
     var showsDragThumbnail = true
+    /// Edit after capture: Save (⌘S) to the save folder, and Stash to keep it in the history only.
+    var onSave: (() -> Void)?
+    var onStash: (() -> Void)?
 
     private static let drawingTools: [AnnotationTool] = [
         .select, .arrow, .rectangle, .filledRectangle, .ellipse, .line, .pencil, .highlighter, .text, .counter,
@@ -201,6 +204,16 @@ struct AnnotateToolbar: View {
             Button("Cancel", action: onCancel)
                 .keyboardShortcut(.cancelAction)
                 .buttonStyle(.bordered)
+            if let onStash {
+                Button("Stash", action: onStash)
+                    .buttonStyle(.bordered)
+                    .help("Keep it in the history (⇧⌘V) without copying it")
+            }
+            if let onSave {
+                Button("Save", action: onSave)
+                    .buttonStyle(.bordered)
+                    .help("Save to the save folder (⌘S)")
+            }
             if let doneModifiers {
                 Button(doneTitle, action: onDone)
                     .keyboardShortcut(.return, modifiers: doneModifiers)

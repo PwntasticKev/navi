@@ -6,9 +6,13 @@ import os
 
 /// Edit after capture. The captured area stays where it was on the frozen, dimmed screen, so it
 /// still looks like a screenshot in progress, and it becomes the markup canvas. The toolbar floats
-/// beside the area. No window, no title bar. Return copies the marked-up shot; Esc cancels.
+/// beside the area. No window, no title bar. Return copies the marked-up shot, ⌘S saves it, Stash
+/// only keeps it in the history; Esc cancels.
 @MainActor
 final class InPlaceAnnotator {
+    /// What to do with the marked-up shot.
+    enum Action { case copy, save, stash }
+
     private static let logger = Logger(subsystem: "com.donovanhiland.navi", category: "Capture")
     private let model: AnnotateModel
     private let screen: NSScreen
@@ -24,12 +28,12 @@ final class InPlaceAnnotator {
     /// `NSApp.activate()`, and then no key event reaches the window or the local monitor.
     private var fallbackKeys: [HotKey] = []
     private var colorPanelLevel: NSWindow.Level?
-    /// Gets the result on Return or Copy, nil on Esc or Cancel. Runs once.
-    private var onFinish: ((AnnotateEditor.Result?) -> Void)?
+    /// Gets the action and the result, or nil on Esc or Cancel. Runs once.
+    private var onFinish: (((Action, AnnotateEditor.Result)?) -> Void)?
 
     init(
         captured: CapturedImage, backdrop: CGImage?, screen: NSScreen, area: CGRect,
-        onFinish: @escaping (AnnotateEditor.Result?) -> Void
+        onFinish: @escaping ((Action, AnnotateEditor.Result)?) -> Void
     ) {
         model = AnnotateModel(base: captured.image, scale: captured.scale)
         self.backdrop = backdrop
@@ -44,8 +48,10 @@ final class InPlaceAnnotator {
             model: model,
             backdrop: backdrop,
             area: area,
-            onDone: { [weak self] in self?.finish(copying: true) },
-            onCancel: { [weak self] in self?.finish(copying: false) }
+            onDone: { [weak self] in self?.finish(.copy) },
+            onSave: { [weak self] in self?.finish(.save) },
+            onStash: { [weak self] in self?.finish(.stash) },
+            onCancel: { [weak self] in self?.finish(nil) }
         ))
         // The window is the size of the screen. Do not let SwiftUI resize it to fit the content.
         hosting.sizingOptions = []
@@ -67,11 +73,12 @@ final class InPlaceAnnotator {
         resignObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.finish(copying: false) }
+            MainActor.assumeIsolated { self?.finish(nil) }
         }
     }
 
-    private func finish(copying: Bool) {
+    /// Nil cancels.
+    private func finish(_ action: Action?) {
         guard let onFinish else { return }
         self.onFinish = nil
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
@@ -83,9 +90,11 @@ final class InPlaceAnnotator {
         releaseFallbackKeys()
         if let colorPanelLevel { NSColorPanel.shared.level = colorPanelLevel }
         colorPanelLevel = nil
+        // Cancel: just go away, with no macOS close animation.
+        if action == nil { window?.animationBehavior = .none }
         window?.orderOut(nil)
         window = nil
-        guard copying else {
+        guard let action else {
             onFinish(nil)
             return
         }
@@ -95,7 +104,7 @@ final class InPlaceAnnotator {
             onFinish(nil)
             return
         }
-        onFinish(AnnotateEditor.Result(flat: flat, base: model.base, document: model.document, pointSize: model.pointSize))
+        onFinish((action, AnnotateEditor.Result(flat: flat, base: model.base, document: model.document, pointSize: model.pointSize)))
     }
 
     /// Return copies and Esc cancels, unless text is being typed or a crop is open: then they end
@@ -126,11 +135,11 @@ final class InPlaceAnnotator {
     }
 
     private func pressReturn() {
-        if model.textEdit != nil { model.finishText() } else if model.cropRect != nil { model.applyCrop() } else { finish(copying: true) }
+        if model.textEdit != nil { model.finishText() } else if model.cropRect != nil { model.applyCrop() } else { finish(.copy) }
     }
 
     private func pressEscape() {
-        if model.textEdit != nil { model.finishText() } else if model.cropRect != nil { model.cancelCrop() } else { finish(copying: false) }
+        if model.textEdit != nil { model.finishText() } else if model.cropRect != nil { model.cancelCrop() } else { finish(nil) }
     }
 
     private func handle(_ event: NSEvent) -> Bool {
@@ -142,8 +151,12 @@ final class InPlaceAnnotator {
             if code == AnnotateKeys.escape { model.cancelCrop(); return true }
         }
         if model.textEdit == nil, plain {
-            if isReturn { finish(copying: true); return true }
-            if code == AnnotateKeys.escape { finish(copying: false); return true }
+            if isReturn { finish(.copy); return true }
+            if code == AnnotateKeys.escape { finish(nil); return true }
+        }
+        if model.textEdit == nil, AnnotateKeys.modifiers(of: event) == .command, code == UInt16(kVK_ANSI_S) {
+            finish(.save)
+            return true
         }
         return AnnotateKeys.handle(event, model: model)
     }
@@ -177,6 +190,8 @@ struct InPlaceAnnotateView: View {
     let backdrop: CGImage?
     let area: CGRect
     let onDone: () -> Void
+    let onSave: () -> Void
+    let onStash: () -> Void
     let onCancel: () -> Void
     @State private var toolbarSize = CGSize(width: 900, height: 44)
 
@@ -234,7 +249,10 @@ struct InPlaceAnnotateView: View {
     }
 
     private var toolbar: some View {
-        AnnotateToolbar(model: model, onDone: onDone, onCancel: onCancel, doneTitle: "Copy", doneModifiers: nil, showsDragThumbnail: false)
+        AnnotateToolbar(
+            model: model, onDone: onDone, onCancel: onCancel, doneTitle: "Copy", doneModifiers: nil,
+            showsDragThumbnail: false, onSave: onSave, onStash: onStash
+        )
             .fixedSize()
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))

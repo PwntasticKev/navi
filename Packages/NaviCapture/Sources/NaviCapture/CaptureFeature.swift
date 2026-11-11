@@ -211,6 +211,7 @@ public final class CaptureFeature {
         session.showsModeBar = modeBar
         session.holdsSelection = modeBar
         session.canRecord = onRecordRequest != nil
+        session.keepsOverlayUntilDone = purpose == .screenshot && timer == 0 && settings.editAfterCapture
         self.session = session
         // No NSApp.activate(): the overlay panels take the keys without raising Navi's other windows.
         session.begin()
@@ -336,8 +337,8 @@ public final class CaptureFeature {
             inPlaceEditor = nil
             isBusy = false
             sourceApp?.activate()
-            if let result {
-                deliverEdited(result, on: screen, sourceApp: sourceApp)
+            if let (action, result) = result {
+                deliverEdited(result, action: action, on: screen, sourceApp: sourceApp)
             } else {
                 copiesNextShot = false
             }
@@ -346,12 +347,17 @@ public final class CaptureFeature {
         editor.show()
     }
 
-    /// Copies the marked-up shot and adds it to the history, with its marks kept editable.
-    private func deliverEdited(_ result: AnnotateEditor.Result, on screen: NSScreen, sourceApp: NSRunningApplication?) {
+    /// Copies, saves, or stashes the marked-up shot. It always goes to the history,
+    /// with its marks kept editable.
+    private func deliverEdited(
+        _ result: AnnotateEditor.Result, action: InPlaceAnnotator.Action, on screen: NSScreen, sourceApp: NSRunningApplication?
+    ) {
         copiesNextShot = false
         let image = Self.image(result.flat, pointSize: result.pointSize)
-        NaviPasteboard.write(image: image)
-        Toast.show("Copied", on: screen)
+        if action == .copy {
+            NaviPasteboard.write(image: image)
+            Toast.show("Copied", on: screen)
+        }
         guard let png = ImageOps.png(result.flat, pointSize: result.pointSize) else {
             logger.error("Could not encode the edited capture as PNG")
             return
@@ -360,11 +366,32 @@ public final class CaptureFeature {
             fileData: png, fileExtension: "png", kind: .screenshot,
             sourceApp: sourceApp?.localizedName, sourceBundleID: sourceApp?.bundleIdentifier, deduplicate: false
         )
-        guard let id = item?.id else { return }
-        do {
-            try MarkupStore.save(base: result.base, document: result.document, to: inbox.markupURL(for: id))
-        } catch {
-            logger.error("Could not save the markup: \(error.localizedDescription)")
+        if let id = item?.id {
+            do {
+                try MarkupStore.save(base: result.base, document: result.document, to: inbox.markupURL(for: id))
+            } catch {
+                logger.error("Could not save the markup: \(error.localizedDescription)")
+            }
+        }
+        switch action {
+        case .copy:
+            break
+        case .save:
+            let createdAt = Date.now
+            let folder = settings.saveFolder
+            let url = CaptureGeometry.uniqueURL(
+                in: folder, name: CaptureGeometry.fileName(for: createdAt, fileExtension: "png")
+            ) { FileManager.default.fileExists(atPath: $0.path) }
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try png.write(to: url, options: .atomic)
+                Toast.show("Saved to \(folder.lastPathComponent)", on: screen)
+            } catch {
+                logger.error("Could not save the capture: \(error.localizedDescription)")
+                NSSound.beep()
+            }
+        case .stash:
+            Toast.show("Stashed. ⇧⌘V to find it", on: screen)
         }
     }
 
@@ -379,19 +406,29 @@ public final class CaptureFeature {
             NaviPasteboard.write(image: Self.image(captured.image, pointSize: pointSize))
         }
         copiesNextShot = false
-        guard let png = ImageOps.png(captured.image, pointSize: pointSize) else {
-            logger.error("Could not encode the capture as PNG")
-            return
-        }
-        let item = inbox.add(
-            fileData: png, fileExtension: "png", kind: .screenshot,
-            sourceApp: sourceApp?.localizedName, sourceBundleID: sourceApp?.bundleIdentifier, deduplicate: false
-        )
-        do {
-            let card = try Card(inboxID: item?.id, image: Self.image(captured.image, pointSize: pointSize), png: png, createdAt: .now)
-            cards.show(card, on: screen)
-        } catch {
-            logger.error("Could not make the corner card: \(error.localizedDescription)")
+        let started = ContinuousClock.now
+        let image = captured.image
+        Task {
+            // PNG encoding takes about 0.1 s for a full 4K screen, so it runs off the main thread.
+            let encoded = await Task.detached(priority: .userInitiated) {
+                ImageOps.png(image, pointSize: pointSize)
+            }.value
+            guard let png = encoded else {
+                logger.error("Could not encode the capture as PNG")
+                return
+            }
+            let item = inbox.add(
+                fileData: png, fileExtension: "png", kind: .screenshot,
+                sourceApp: sourceApp?.localizedName, sourceBundleID: sourceApp?.bundleIdentifier, deduplicate: false
+            )
+            do {
+                let card = try Card(inboxID: item?.id, image: Self.image(image, pointSize: pointSize), png: png, createdAt: .now)
+                cards.show(card, on: screen)
+            } catch {
+                logger.error("Could not make the corner card: \(error.localizedDescription)")
+            }
+            let elapsed = ContinuousClock.now - started
+            logger.info("Capture to card: \(Int(elapsed / .milliseconds(1))) ms")
         }
     }
 
@@ -445,6 +482,41 @@ public final class CaptureFeature {
     private func showInFinder(_ card: Card) {
         guard let url = save(card, thenClose: false) else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    /// Opens the markup editor for an image in the history (⌘E in the ⇧⌘V list). Marks from an
+    /// earlier edit stay editable. Done updates the history item and its open card, if any.
+    public func annotate(inboxID id: UUID) {
+        if let card = cards.card(forInboxID: id) {
+            annotate(card)
+            return
+        }
+        guard let data = inbox.fileData(for: id),
+              let bitmap = NSBitmapImageRep(data: data), let flat = bitmap.cgImage
+        else { return }
+        let scale = bitmap.size.width > 0 ? CGFloat(bitmap.pixelsWide) / bitmap.size.width : 1
+        var base = flat
+        var document = AnnotationDocument()
+        if let saved = MarkupStore.load(from: inbox.markupURL(for: id)) { (base, document) = saved }
+        let token = UUID()
+        let editor = AnnotateEditor(base: base, document: document, scale: scale) { [weak self] result in
+            self?.applyMarkup(result, toInboxID: id)
+        } onClose: { [weak self] in
+            self?.editors[token] = nil
+        }
+        editors[token] = editor
+        editor.show()
+    }
+
+    private func applyMarkup(_ result: AnnotateEditor.Result, toInboxID id: UUID) {
+        guard let png = ImageOps.png(result.flat, pointSize: result.pointSize) else { return }
+        if settings.copyToClipboard { NaviPasteboard.write(image: Self.image(result.flat, pointSize: result.pointSize)) }
+        inbox.updateFile(id, data: png)
+        do {
+            try MarkupStore.save(base: result.base, document: result.document, to: inbox.markupURL(for: id))
+        } catch {
+            logger.error("Could not save the markup: \(error.localizedDescription)")
+        }
     }
 
     /// Opens the markup editor. Marks from an earlier edit stay editable.

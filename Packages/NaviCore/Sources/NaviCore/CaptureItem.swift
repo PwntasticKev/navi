@@ -7,6 +7,9 @@ public enum CaptureKind: String, Codable, Sendable, CaseIterable {
     case screenshot
     case recording
     case dictation
+
+    /// A still image that the markup editor can open.
+    public var isImage: Bool { self == .image || self == .screenshot }
 }
 
 /// One entry in the shared history list.
