@@ -60,7 +60,10 @@ Desktop Icons). Not checked yet: the `⌥⇧⌘N` menu and a second display.
   so there is no mic dot between dictations; a press only starts it. "Keep
   Microphone Ready" (menu, off by default; Hex's "Keep ready") keeps the mic
   open with a 450 ms pre-roll, so a press records at once (macOS shows the mic
-  dot). Recording runs 200 ms past the release so
+  dot). The mic is an input-only AUHAL unit on the default input, like Hex
+  (cpal). Not `AVAudioEngine`: it joins the mic and the speakers in a hidden
+  aggregate device, which changes music and cuts it out when it stops.
+  Recording runs 200 ms past the release so
   the last word is kept. The cleanup model session is pre-warmed. Timings log
   under the `Dictation` category ("Release to text: … ms"). fn with another key (fn+⌫,
   fn+arrows) never dictates. The first launch asks before it uses fn. When on,

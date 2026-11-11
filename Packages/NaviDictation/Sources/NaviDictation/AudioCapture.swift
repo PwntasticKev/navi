@@ -1,4 +1,6 @@
 @preconcurrency import AVFoundation
+import AudioToolbox
+import CoreAudio
 import os
 
 /// An audio buffer that moves between threads. The buffer is not changed after the tap hands it over.
@@ -50,13 +52,17 @@ struct PreRollBuffer<Chunk> {
 
 /// The microphone, in two modes.
 ///
-/// - **Warm (default, like Wispr Flow):** the engine and its tap are set up ahead of time (`prepare`) but
-///   not running, so there is no microphone indicator. A press only starts it (`open`), which is quick;
+/// - **Warm (default, like Wispr Flow):** the input unit is set up ahead of time (`prepare`) but not
+///   running, so there is no microphone indicator. A press only starts it (`open`), which is quick;
 ///   after the dictation it stops but stays set up (`pause`).
 /// - **Keep ready (Hex's mode):** the stream stays open between dictations and keeps the last `preRoll`
 ///   seconds, so a press records from just before it. macOS shows the microphone indicator the whole time.
 ///
-/// Not tied to the main actor: the tap block runs on an audio thread.
+/// It records with an input-only audio unit (AUHAL) on the default input device, like Hex (through cpal).
+/// It never touches the output device: `AVAudioEngine` joins the mic and the speakers in a hidden
+/// aggregate device, which changes how music sounds and cuts it out when the engine stops.
+///
+/// Not tied to the main actor: the input callback runs on an audio thread.
 final class Microphone: @unchecked Sendable {
     /// Audio kept from before the press (Hex keeps 450 ms).
     static let preRoll: Double = 0.45
@@ -66,35 +72,53 @@ final class Microphone: @unchecked Sendable {
     /// Holds audio buffers, which only move under the lock.
     private struct State: @unchecked Sendable {
         var running = false
-        var prepared = false
+        var unit: AudioUnit?
+        var format: AVAudioFormat?
         var sink: AsyncStream<AudioChunk>.Continuation?
         var preRoll = PreRollBuffer<AVAudioPCMBuffer>(capacity: 0)
         var level: Float = 0
     }
 
-    private let engine = AVAudioEngine()
     /// Setup, start, stop, and teardown take turns (they run on different threads).
     private let setup = NSRecursiveLock()
     private let state = OSAllocatedUnfairLock(initialState: State())
     private static let logger = Logger(subsystem: "com.donovanhiland.navi", category: "Microphone")
-    private var configurationObserver: (any NSObjectProtocol)?
+    private let listenerQueue = DispatchQueue(label: "com.donovanhiland.navi.microphone")
+    private var defaultInputListener: AudioObjectPropertyListenerBlock?
+
+    private static let defaultInputAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDefaultInputDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
 
     init() {
-        // A new input device (AirPods, a USB mic) stops the engine. Open it again on the new device.
-        configurationObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
-        ) { [weak self] _ in
+        // A new default input (AirPods, a USB mic): set up again on the new device.
+        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             guard let self else { return }
-            let (wasRunning, wasPrepared) = state.withLock { ($0.running, $0.prepared) }
+            let (wasRunning, wasPrepared) = state.withLockUnchecked { ($0.running, $0.unit != nil) }
             guard wasPrepared else { return }
-            Self.logger.info("Input device changed; setting up the microphone again")
+            Self.logger.info("Default input changed; setting up the microphone again")
             close()
-            if wasRunning { try? open() } else { try? prepare() }
+            do {
+                if wasRunning { try open() } else { try prepare() }
+            } catch {
+                Self.logger.error("Could not set up the new input: \(error.localizedDescription)")
+            }
         }
+        defaultInputListener = listener
+        var address = Self.defaultInputAddress
+        AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, listenerQueue, listener)
     }
 
     deinit {
-        if let configurationObserver { NotificationCenter.default.removeObserver(configurationObserver) }
+        if let defaultInputListener {
+            var address = Self.defaultInputAddress
+            AudioObjectRemovePropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject), &address, listenerQueue, defaultInputListener
+            )
+        }
+        close()
     }
 
     var isRunning: Bool { state.withLock { $0.running } }
@@ -102,23 +126,18 @@ final class Microphone: @unchecked Sendable {
     /// Loudness of the newest buffer, 0...1.
     var level: Float { state.withLock { $0.level } }
 
-    /// Sets up the engine and its tap without starting the microphone (no indicator). Makes `open` quick.
-    /// Can take a moment, so call it off the main thread.
+    /// Sets up the input unit without starting the microphone (no indicator). Makes `open` quick.
+    /// Takes about 20 ms, so call it off the main thread.
     func prepare() throws {
         setup.lock()
         defer { setup.unlock() }
-        guard !state.withLock({ $0.prepared }) else { return }
-        let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else { throw DictationError.noMicrophone }
-        let capacity = Int(format.sampleRate * Self.preRoll)
-        state.withLock { $0.preRoll = PreRollBuffer(capacity: capacity) }
-        // A small buffer (about 20 ms at 48 kHz) keeps the press and release boundaries tight.
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            self?.receive(buffer)
+        guard state.withLockUnchecked({ $0.unit == nil }) else { return }
+        let (unit, format) = try Self.makeInputUnit(context: Unmanaged.passUnretained(self).toOpaque())
+        state.withLockUnchecked {
+            $0.unit = unit
+            $0.format = format
+            $0.preRoll = PreRollBuffer(capacity: Int(format.sampleRate * Self.preRoll))
         }
-        engine.prepare()
-        state.withLock { $0.prepared = true }
     }
 
     /// Starts the microphone, setting it up first if needed.
@@ -127,7 +146,8 @@ final class Microphone: @unchecked Sendable {
         defer { setup.unlock() }
         guard !isRunning else { return }
         try prepare()
-        try engine.start()
+        guard let unit = state.withLockUnchecked({ $0.unit }) else { throw DictationError.noMicrophone }
+        try Self.check(AudioOutputUnitStart(unit), "start the input")
         state.withLock { $0.running = true }
     }
 
@@ -135,19 +155,17 @@ final class Microphone: @unchecked Sendable {
     func pause() {
         setup.lock()
         defer { setup.unlock() }
-        let (wasRunning, sink) = state.withLock { state -> (Bool, AsyncStream<AudioChunk>.Continuation?) in
+        let (wasRunning, unit, sink) = state.withLockUnchecked { state in
             defer {
                 state.running = false
                 state.sink = nil
                 state.level = 0
                 _ = state.preRoll.drain()
             }
-            return (state.running, state.sink)
+            return (state.running, state.unit, state.sink)
         }
         sink?.finish()
-        guard wasRunning else { return }
-        engine.stop()
-        engine.prepare()
+        if wasRunning, let unit { AudioOutputUnitStop(unit) }
     }
 
     /// Stops the microphone and takes the setup down.
@@ -155,13 +173,16 @@ final class Microphone: @unchecked Sendable {
         setup.lock()
         defer { setup.unlock() }
         pause()
-        let wasPrepared = state.withLock { state -> Bool in
-            defer { state.prepared = false }
-            return state.prepared
+        let unit = state.withLockUnchecked { state -> AudioUnit? in
+            defer {
+                state.unit = nil
+                state.format = nil
+            }
+            return state.unit
         }
-        guard wasPrepared else { return }
-        engine.inputNode.removeTap(onBus: 0)
-        engine.reset()
+        guard let unit else { return }
+        AudioUnitUninitialize(unit)
+        AudioComponentInstanceDispose(unit)
     }
 
     /// Sends the audio to `sink` from now on. With `includePreRoll`, the kept audio from just before
@@ -184,31 +205,100 @@ final class Microphone: @unchecked Sendable {
         sink?.finish()
     }
 
-    private func receive(_ buffer: AVAudioPCMBuffer) {
-        let level = Self.loudness(of: buffer)
-        let sink = state.withLock { state -> AsyncStream<AudioChunk>.Continuation? in
-            state.level = level
-            return state.sink
-        }
-        if let sink {
-            sink.yield(AudioChunk(buffer: buffer))
-        } else if let copy = Self.copy(buffer) {
-            // The engine may reuse its buffer, so the pre-roll keeps a copy.
-            state.withLock { $0.preRoll.append(copy, frames: Int(copy.frameLength)) }
+    // MARK: Input unit
+
+    /// An AUHAL unit with input on and output off, on the default input device, initialized but not started.
+    private static func makeInputUnit(context: UnsafeMutableRawPointer) throws -> (AudioUnit, AVAudioFormat) {
+        var description = AudioComponentDescription(
+            componentType: kAudioUnitType_Output, componentSubType: kAudioUnitSubType_HALOutput,
+            componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0
+        )
+        guard let component = AudioComponentFindNext(nil, &description) else { throw DictationError.noMicrophone }
+        var created: AudioUnit?
+        try check(AudioComponentInstanceNew(component, &created), "create the input unit")
+        guard let unit = created else { throw DictationError.noMicrophone }
+        do {
+            var on: UInt32 = 1
+            var off: UInt32 = 0
+            let flagSize = UInt32(MemoryLayout<UInt32>.size)
+            try check(AudioUnitSetProperty(unit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1, &on, flagSize), "turn input on")
+            try check(AudioUnitSetProperty(unit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Output, 0, &off, flagSize), "turn output off")
+
+            var device = try defaultInputDevice()
+            try check(AudioUnitSetProperty(
+                unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &device,
+                UInt32(MemoryLayout<AudioObjectID>.size)
+            ), "pick the input device")
+
+            // The device's own format, then the same rate and channels as Float32 for the callback.
+            var hardware = AudioStreamBasicDescription()
+            var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+            try check(AudioUnitGetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 1, &hardware, &size), "read the input format")
+            guard hardware.mSampleRate > 0, hardware.mChannelsPerFrame > 0,
+                  let format = AVAudioFormat(standardFormatWithSampleRate: hardware.mSampleRate, channels: hardware.mChannelsPerFrame)
+            else { throw DictationError.noMicrophone }
+            var client = format.streamDescription.pointee
+            try check(AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, &client, size), "set the input format")
+
+            var callback = AURenderCallbackStruct(inputProc: inputCallback, inputProcRefCon: context)
+            try check(AudioUnitSetProperty(
+                unit, kAudioOutputUnitProperty_SetInputCallback, kAudioUnitScope_Global, 0, &callback,
+                UInt32(MemoryLayout<AURenderCallbackStruct>.size)
+            ), "set the input callback")
+            try check(AudioUnitInitialize(unit), "set up the input unit")
+            return (unit, format)
+        } catch {
+            AudioComponentInstanceDispose(unit)
+            throw error
         }
     }
 
-    private static func copy(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-        guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameLength) else { return nil }
-        copy.frameLength = buffer.frameLength
-        let bytesPerFrame = Int(buffer.format.streamDescription.pointee.mBytesPerFrame)
-        let source = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
-        let target = UnsafeMutableAudioBufferListPointer(copy.mutableAudioBufferList)
-        for index in 0 ..< min(source.count, target.count) {
-            guard let from = source[index].mData, let to = target[index].mData else { continue }
-            memcpy(to, from, Int(buffer.frameLength) * bytesPerFrame)
+    private static func defaultInputDevice() throws -> AudioObjectID {
+        var device = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        var address = defaultInputAddress
+        try check(AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device
+        ), "find the default input")
+        guard device != kAudioObjectUnknown else { throw DictationError.noMicrophone }
+        return device
+    }
+
+    private static func check(_ status: OSStatus, _ step: String) throws {
+        guard status != noErr else { return }
+        logger.error("Could not \(step): OSStatus \(status)")
+        throw DictationError.noMicrophone
+    }
+
+    /// Runs on the audio thread for each slice of input: pulls the audio into a new buffer.
+    private static let inputCallback: AURenderCallback = { context, flags, timeStamp, bus, frames, _ in
+        let microphone = Unmanaged<Microphone>.fromOpaque(context).takeUnretainedValue()
+        return microphone.render(flags: flags, timeStamp: timeStamp, bus: bus, frames: frames)
+    }
+
+    private func render(
+        flags: UnsafeMutablePointer<AudioUnitRenderActionFlags>, timeStamp: UnsafePointer<AudioTimeStamp>,
+        bus: UInt32, frames: UInt32
+    ) -> OSStatus {
+        guard let (unit, format) = state.withLockUnchecked({ state in state.unit.flatMap { unit in state.format.map { (unit, $0) } } }),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)
+        else { return noErr }
+        buffer.frameLength = frames
+        let status = AudioUnitRender(unit, flags, timeStamp, bus, frames, buffer.mutableAudioBufferList)
+        guard status == noErr else { return status }
+        receive(buffer)
+        return noErr
+    }
+
+    private func receive(_ buffer: AVAudioPCMBuffer) {
+        let level = Self.loudness(of: buffer)
+        let sink = state.withLockUnchecked { state -> AsyncStream<AudioChunk>.Continuation? in
+            state.level = level
+            // Each slice is a new buffer, so the pre-roll can keep it as is.
+            if state.sink == nil { state.preRoll.append(buffer, frames: Int(buffer.frameLength)) }
+            return state.sink
         }
-        return copy
+        sink?.yield(AudioChunk(buffer: buffer))
     }
 
     /// Loudness from 0 to 1. RMS in dB, with -50 dB as silence, and a curve that keeps quiet speech visible.
