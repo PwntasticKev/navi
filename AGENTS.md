@@ -279,14 +279,55 @@ cd Packages/NaviRecording && swift test # recording math, GIF, audio mixdown
 cd Packages/NaviDictation && swift test # cleanup rules, fn gestures, fn setting, scoring
 cd Packages/NaviDictation && swift run dictation-bench [--audio [--speech apple,parakeet]] [--failures] [--save]
 cd Packages/NaviClipboard && swift run -c release history-bench [--sizes 200,1000,5000] [--corpus ascii|mixed] [--save]  # History list benchmark
+scripts/tests/run.sh    # release script tests (plan, notes HTML, Sparkle signature checker)
+MODE=dry-run VERSION=9.9.9 BUILD=1 NOTES=x SKIP_TESTS=1 scripts/ci-release.sh  # release without Apple keys; nothing published
 scripts/dev.sh          # build and run Navi Dev in place of Navi (fresh: wipe it first; stop: back to Navi)
 ```
 
-Releases live on GitHub (`donovanhiland/navi` is public). Run
-`scripts/release.sh <version> "<notes>"`: it bumps the version and build number
-in `project.yml`, runs `scripts/share.sh`, signs the update with the Sparkle key
-(EdDSA, private half in the login keychain; public half is `SUPublicEDKey` in
-`project.yml`), writes `appcast.xml`, and makes the release. Share
+Releases live on GitHub (`donovanhiland/navi` is public) and are built on
+GitHub Actions (`.github/workflows/release.yml`). It runs every night at 10:00
+UTC and goes to everyone (no separate nightly channel). A Linux `plan` job runs
+`scripts/release-plan.sh`: when `main` has no commits since the last `v*` tag it
+stops, before a Mac starts or a key loads; otherwise it picks the next patch
+version, the build number (the commit count of `main`, so it only grows), and the
+notes (commit subjects since the last tag). The `release` job on `macos-26` runs
+`scripts/ci-release.sh` on that exact commit: test every package, archive with
+`MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` set on the command line, sign
+with a "Developer ID Application" certificate, notarize (`notarytool`, App Store
+Connect API key), staple, check the app, sign the update with the Sparkle key
+(EdDSA; public half is `SPARKLE_PUBLIC_KEY` in `project.yml`, which fills `SUPublicEDKey`), write `appcast.xml`,
+and make the release with the tag on the built commit. Nothing is committed, so
+the versions in `project.yml` are only for local builds. A failed step stops it
+before anything is published. To release now, push to `main` and run
+`scripts/release.sh [<version> ["<notes>"]]` (or Actions → Release → Run
+workflow). Secrets (`DEVELOPER_ID_P12`, `DEVELOPER_ID_P12_PASSWORD`,
+`ASC_KEY_P8`, `ASC_KEY_ID`, `ASC_ISSUER_ID`, `SPARKLE_PRIVATE_KEY`) are set once
+with `scripts/release-secrets.sh`. CI does not use Xcode cloud signing: cloud
+signing for Developer ID does not work with an API key. Actions in workflows are
+pinned to full commit SHAs.
+
+`scripts/ci-release.sh` has three modes (`MODE`): `publish` (default),
+`rehearse` (real keys and notarization, nothing published; the workflow's
+"rehearse" box, to check the secrets), and `dry-run` (no Apple keys: ad hoc
+signature, no notarization, a throwaway Sparkle key unless one is given,
+nothing published). Every mode checks the app (bundle ID, version, build,
+`SUFeedURL`, `SUPublicEDKey`, mic and camera entitlements, hardened runtime,
+signature; signed modes add Developer ID team, stapled ticket, Gatekeeper)
+and checks the feed with `scripts/sparkle-check.swift`, which verifies the
+Ed25519 signature with CryptoKit the way Navi does. `publish` also downloads
+the published feed and zip and checks them again. Sparkle's `generate_appcast`
+leaves the signature out when the key does not match the app's key; the checks
+stop on that.
+
+Pull requests: `.github/workflows/ci.yml` runs on each PR and push to `main`:
+every package's tests, an unsigned Debug build, a release dry run, and the
+release script tests (`scripts/tests/run.sh`: release plan, notes HTML, and the
+signature checker against Sparkle's `sign_update`; `shellcheck`). `Check` sums
+them up and is the one status to require. `CONTRIBUTING.md` and
+`.github/pull_request_template.md` say what a PR needs (one problem, Problem /
+Change / Verification, screenshots for UI).
+
+Share
 `https://github.com/donovanhiland/navi/releases/latest/download/Navi.zip`.
 Navi checks `…/releases/latest/download/appcast.xml` daily and from "Check for
 Updates…" in the menu. Debug builds never update themselves.
