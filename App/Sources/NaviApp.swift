@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var extraHotKeys: [HotKey] = []
     private var screenshotHotKeys: [HotKey] = []
     private lazy var naviMenu = NaviMenu(app: self)
+    private lazy var settingsPanel = SettingsPanel(app: self)
     private lazy var shortcutRecorder = HistoryShortcutRecorder(
         apply: { [weak self] in self?.setHistoryShortcut($0) ?? .refused },
         onClose: { [weak self] in self?.resumeHotKeys() }
@@ -68,6 +69,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case nil: askAboutScreenshotKeys()
         }
         if !dictation.hasChosen { askAboutTalkToType() }
+        // Build the Settings panel once the launch work is done, so its first open is instant.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            self?.settingsPanel.prepare()
+        }
         if !ClipboardFeature.hasAccessibility {
             ClipboardFeature.requestAccessibility()
         }
@@ -174,6 +180,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             registerHotKeys()
             logger.info("Navi shortcuts resumed, History on \(self.historyShortcut.display, privacy: .public)")
         }
+    }
+
+    /// Opens the Settings panel with its top-left corner at `anchor`, where the Navi menu was.
+    func showSettings(at anchor: CGPoint) {
+        settingsPanel.show(at: anchor)
     }
 
     /// Opens the recorder. Navi's shortcuts are off while it is open.

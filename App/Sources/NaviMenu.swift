@@ -1,8 +1,6 @@
 import AppKit
 import NaviCapture
-import NaviClipboard
 import NaviCore
-import NaviDictation
 
 /// The Navi menu. It shows from the menu bar icon, and at the mouse with `⌥⇧⌘N`, which still works
 /// when the icon is hidden behind the notch.
@@ -11,6 +9,10 @@ final class NaviMenu: NSObject, NSMenuDelegate {
     private unowned let app: AppDelegate
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let menu = NSMenu()
+    /// The top-left corner of the menu the last time it opened, in screen points. Settings opens there.
+    private var menuTopLeft: CGPoint = .zero
+    /// True while the menu opens at the mouse (`⌥⇧⌘N`) rather than from the menu bar icon.
+    private var opensAtMouse = false
 
     init(app: AppDelegate) {
         self.app = app
@@ -23,14 +25,24 @@ final class NaviMenu: NSObject, NSMenuDelegate {
     /// Opens the menu at the mouse.
     func popUpAtMouse() {
         NSApp.activate()
+        opensAtMouse = true
+        defer { opensAtMouse = false }
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+
+    /// Notes where the menu's top-left corner is: at the mouse, or under the menu bar icon.
+    func menuWillOpen(_ menu: NSMenu) {
+        if !opensAtMouse, let frame = statusItem.button?.window?.frame {
+            menuTopLeft = CGPoint(x: frame.minX, y: frame.minY)
+        } else {
+            menuTopLeft = NSEvent.mouseLocation
+        }
     }
 
     /// Rebuilds the items each time the menu opens, so the checkmarks are current.
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let capture = app.capture
-        let settings = capture.settings
 
         menu.addItem(item("All-in-One", key: "5", [.command, .shift]) { capture.captureAllInOne() })
         menu.addItem(item("Capture Area", key: "4", [.command, .shift]) { capture.captureArea() })
@@ -50,14 +62,6 @@ final class NaviMenu: NSObject, NSMenuDelegate {
         } else {
             menu.addItem(item("Record Screen…", key: "5", [.command, .shift, .option]) { capture.pickRecordingRegion() })
         }
-        menu.addItem(item("Talk to Type (Hold fn)", on: app.dictation.isEnabled) { [app] in
-            app.setTalkToType(!app.dictation.isEnabled)
-        })
-        if app.dictation.isEnabled {
-            menu.addItem(item("Keep Microphone Ready", on: app.dictation.keepsMicrophoneReady) { [app] in
-                app.dictation.keepsMicrophoneReady.toggle()
-            })
-        }
         menu.addItem(.separator())
         menu.addItem(item("Close All Cards") { capture.closeAllCards() })
         if capture.hasPins {
@@ -65,29 +69,11 @@ final class NaviMenu: NSObject, NSMenuDelegate {
             menu.addItem(item("Close Pinned Shots") { capture.closeAllPins() })
         }
         menu.addItem(.separator())
-        menu.addItem(item("Hide Desktop Icons", on: settings.hideDesktopIcons) {
-            settings.hideDesktopIcons.toggle()
-        })
-        menu.addItem(item("Copy Screenshots to Clipboard", on: settings.copyToClipboard) {
-            settings.copyToClipboard.toggle()
-        })
-        menu.addItem(item("Edit Screenshots Before Copying", on: settings.editAfterCapture) {
-            settings.editAfterCapture.toggle()
-        })
-        menu.addItem(item("Use Navi for Screenshot Keys", on: settings.useNaviScreenshotKeys == true) { [app] in
-            app.setUseNaviScreenshotKeys(settings.useNaviScreenshotKeys != true)
-        })
-        menu.addItem(.separator())
         menu.addItem(shortcutItem("Open History", app.historyShortcut) { [app] in app.clipboard.togglePanel() })
-        menu.addItem(item("Change History Shortcut…") { [app] in app.changeHistoryShortcut() })
-        menu.addItem(item("Clear History") { [app] in app.inbox.clearUnpinned() })
         menu.addItem(.separator())
-        menu.addItem(item("Accessibility Permission…") { ClipboardFeature.requestAccessibility() })
-        menu.addItem(item("Screen Recording Permission…") { CaptureFeature.requestScreenAccess() })
-        menu.addItem(item("Microphone and Speech Permission…") {
-            Task { _ = await DictationFeature.requestPermissions() }
+        menu.addItem(item("Settings…", key: ",", .command) { [app, weak self] in
+            app.showSettings(at: self?.menuTopLeft ?? NSEvent.mouseLocation)
         })
-        menu.addItem(.separator())
         menu.addItem(item("Check for Updates…") { [app] in app.updater.checkForUpdates(nil) })
         menu.addItem(item("Quit Navi", key: "q", .command) { NSApp.terminate(nil) })
     }

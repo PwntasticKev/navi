@@ -11,7 +11,7 @@ A macOS menu bar app for capture. It combines four tools:
 
 The main idea: every capture (clip, screenshot, recording, GIF, dictated text,
 OCR text) goes to one place. It shows first as a corner card, then in one shared
-history list. `⇧⌘V` opens that list. The user can change it in the Navi menu.
+history list. `⇧⌘V` opens that list. The user can change it in Settings.
 
 ## Plan
 
@@ -61,7 +61,7 @@ Desktop Icons). Not checked yet: the `⌥⇧⌘N` menu and a second display.
   cursor, then the old clipboard comes back. Speed: the pill shows on the
   press. By default (like Wispr Flow) the mic is set up ahead of time but off,
   so there is no mic dot between dictations; a press only starts it. "Keep
-  Microphone Ready" (menu, off by default; Hex's "Keep ready") keeps the mic
+  Microphone Ready" (Settings, off by default; Hex's "Keep ready") keeps the mic
   open with a 450 ms pre-roll, so a press records at once (macOS shows the mic
   dot). The mic is an input-only AUHAL unit on the default input, like Hex
   (cpal). Not `AVAudioEngine`: it joins the mic and the speakers in a hidden
@@ -78,7 +78,7 @@ Desktop Icons). Not checked yet: the `⌥⇧⌘N` menu and a second display.
   The app wires it to the capture overlay (`CaptureFeature.onRecordRequest`)
   and to video cards (`CaptureFeature.videoTools`, `showRecording`).
 
-Not built: swipe to close a card, a Settings window, the Screen Studio-style
+Not built: swipe to close a card, the Screen Studio-style
 video editor.
 
 ## Decisions
@@ -117,7 +117,7 @@ video editor.
   `activateSettings -u`) and puts them back exactly as they were on quit. A
   backup from an older run keeps its entries; new IDs are added to it. SIGTERM quits the normal way, so
   `pkill` restores them too. No code runs when the app is deleted, so quitting
-  is what gives the keys back. The first launch asks; the menu has a toggle.
+  is what gives the keys back. The first launch asks; Settings has a toggle ("Navi Screenshot Keys").
 - Area mode (`⇧⌘4`, and the `⇧⌘5` bar in Screenshot or Record) spotlights the
   window under the cursor: the rest of the screen dims, the window gets a purple
   ring and glow, and a label shows its app and pixel size. The highlight glides
@@ -161,8 +161,8 @@ video editor.
 - Save puts files in the macOS screenshot folder (`defaults read com.apple.screencapture location`),
   as `Navi 2026-11-06 at 16.10.12.png`, or on the Desktop when that folder is missing.
   Navi's `capture.saveFolder` key overrides both (`CaptureSettings.saveFolder`).
-- Edit after capture (`CaptureSettings.editAfterCapture`, off by default; menu
-  toggle "Edit Screenshots Before Copying"): after an area shot (`⇧⌘4`, or
+- Edit after capture (`CaptureSettings.editAfterCapture`, off by default; Settings
+  toggle "Mark Up Before Copying"): after an area shot (`⇧⌘4`, or
   Capture in the `⇧⌘5` bar, no timer), the frozen screen stays dimmed and the
   area becomes the markup canvas in place (`Annotate/InPlaceAnnotator.swift`),
   with the toolbar floating below it (above it near the bottom, inside it when
@@ -184,8 +184,8 @@ video editor.
   works. The window editor and this one share `AnnotateToolbar`,
   `AnnotateCanvas`, and `AnnotateKeys`.
 - Every screenshot goes to the clipboard as soon as it is taken, and again after
-  markup Done (`CaptureSettings.copyToClipboard`, on by default; menu toggle
-  "Copy Screenshots to Clipboard").
+  markup Done (`CaptureSettings.copyToClipboard`, on by default; Settings
+  toggle "Copy to Clipboard").
 - Each capture is its own history item, even when its pixels match an older
   shot (`Inbox.add(fileData:…, deduplicate: false)`). Saved markup opens only
   while the history file is still that markup's flat image.
@@ -212,6 +212,14 @@ video editor.
   image in that list opens the markup editor (saved marks stay editable); Done
   updates the history item and its open card. `NaviClipboard` reaches capture
   only through `ClipboardFeature.onAnnotate`, wired in the app.
+- The Navi menu holds actions only. Every on/off setting, the History
+  shortcut, Clear History, and the permissions live in the Settings panel
+  (`Settings…`, `⌘,` in the menu; `App/Sources/SettingsPanel.swift` and
+  `SettingsView.swift`). It pops up where the Navi menu was (under the menu
+  bar icon, or at the mouse after `⌥⇧⌘N`) and looks like that menu: section
+  titles, separators, a rounded hover highlight, and its own accent-colored
+  switches (AppKit switches draw grey because Navi is never the active app).
+  A click anywhere on a row flips it. Esc, ⌘W, or a click away closes it.
 - `⌥⇧⌘N` opens the Navi menu at the mouse. The same menu shows from the
   menu bar icon. It is an AppKit `NSStatusItem` menu, built in `NaviMenu`.
 - Navi marks its own pasteboard writes with `NaviPasteboard.ownType`, so the
@@ -246,6 +254,7 @@ Xnapper's backgrounds, and macshot's auto-redact.
 | `project.yml` | XcodeGen spec. The `.xcodeproj` is generated and gitignored |
 | `App/Sources/NaviApp.swift` | Global hot keys, app wiring |
 | `App/Sources/NaviMenu.swift` | Menu bar icon and the Navi menu (`⌥⇧⌘N` opens it at the mouse) |
+| `App/Sources/SettingsPanel.swift`, `SettingsView.swift` | Settings panel: toggles, History shortcut, permissions |
 | `Packages/NaviCore` | `Inbox` (shared history store), `CaptureItem`, `HotKey` (Carbon global hotkeys) |
 | `Packages/NaviClipboard` | Pasteboard watcher, Maccy-style panel, paste |
 | `Packages/NaviRecording` | Screen recording engine, record bar, camera bubble, overlays, GIF, trim |
