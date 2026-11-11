@@ -11,7 +11,7 @@ A macOS menu bar app for capture. It combines four tools:
 
 The main idea: every capture (clip, screenshot, recording, GIF, dictated text,
 OCR text) goes to one place. It shows first as a corner card, then in one shared
-history list. `⇧⌘V` opens that list.
+history list. `⇧⌘V` opens that list. The user can change it in the Navi menu.
 
 ## Plan
 
@@ -58,7 +58,17 @@ Desktop Icons). Not checked yet: the `⌥⇧⌘N` menu and a second display.
   `SpeechAnalyzer` or `SFSpeechRecognizer` until the Parakeet model is loaded.
   The model, about 0.5 GB, downloads on first start to
   `~/Library/Application Support/FluidAudio/Models`), cleanup with Foundation Models or rules, paste at the
-  cursor, then the old clipboard comes back. fn with another key (fn+⌫,
+  cursor, then the old clipboard comes back. Speed: the pill shows on the
+  press. By default (like Wispr Flow) the mic is set up ahead of time but off,
+  so there is no mic dot between dictations; a press only starts it. "Keep
+  Microphone Ready" (menu, off by default; Hex's "Keep ready") keeps the mic
+  open with a 450 ms pre-roll, so a press records at once (macOS shows the mic
+  dot). The mic is an input-only AUHAL unit on the default input, like Hex
+  (cpal). Not `AVAudioEngine`: it joins the mic and the speakers in a hidden
+  aggregate device, which changes music and cuts it out when it stops.
+  Recording runs 200 ms past the release so
+  the last word is kept. The cleanup model session is pre-warmed. Timings log
+  under the `Dictation` category ("Release to text: … ms"). fn with another key (fn+⌫,
   fn+arrows) never dictates. The first launch asks before it uses fn. When on,
   Navi borrows the fn key setting (`AppleFnUsageType` = 0, "Do Nothing", applied
   with `activateSettings -u`) while it runs and puts it back on quit.
@@ -119,9 +129,17 @@ video editor.
   (press again to stop).
 - Shots leave out Navi's overlays, cards, pins, and pills (window layer above 0)
   but keep Navi's normal windows, such as the markup editor.
+- The selection overlay is a non-activating panel: it takes Esc, Space, and the
+  mouse without activating Navi, so an open markup editor is not raised.
 - The selection overlay shows at once over the live screen. The frozen screen
   images arrive about 0.2 s later and are what gets cropped; a selection that
-  ends first waits for them.
+  ends first waits for them, off screen. The overlay leaves the screen on mouse
+  up. The frozen image is the overlay's layer content (GPU), and the hint pill
+  shows at once at the mouse. PNG encoding runs off the main thread; the card
+  draws a small thumbnail. The time logs under `Capture` ("Capture to card").
+- Screen Recording is requested at launch through ScreenCaptureKit
+  (`SCShareableContent`), which lists Navi in System Settings, switched off, so
+  users only flip the switch.
 - Cards stay on the display where the capture was taken.
 - The history keeps a recording as MP4, with `<id>.preview.png` for its
   thumbnail; paste from history pastes the file. Background clears the
@@ -129,8 +147,23 @@ video editor.
 - Recording cards show the duration, an MP4/GIF switch on hover, and Trim in
   the bottom-left corner (`⌘E` on hover). Pin, markup, OCR, and background are
   for images only.
-- Save puts files on the Desktop, as `Navi 2026-11-06 at 16.10.12.png`.
-  `CaptureSettings.saveFolder` changes it.
+- Save puts files in the macOS screenshot folder (`defaults read com.apple.screencapture location`),
+  as `Navi 2026-11-06 at 16.10.12.png`, or on the Desktop when that folder is missing.
+  Navi's `capture.saveFolder` key overrides both (`CaptureSettings.saveFolder`).
+- Edit after capture (`CaptureSettings.editAfterCapture`, off by default; menu
+  toggle "Edit Screenshots Before Copying"): after an area shot (`⇧⌘4`, or
+  Capture in the `⇧⌘5` bar, no timer), the frozen screen stays dimmed and the
+  area becomes the markup canvas in place (`Annotate/InPlaceAnnotator.swift`),
+  with the toolbar floating below it (above it near the bottom, inside it when
+  it fills the screen). No window or title bar. Return or Copy copies the
+  marked-up shot, adds it to the history with its marks, and shows "Copied";
+  no corner card. Save (`⌘S`) writes it to the save folder and shows "Saved".
+  Stash only keeps it in the history and shows "Stashed". Both add it to the
+  history and do not copy. Esc or Cancel drops the shot, with no close animation (the
+  selection overlay's Esc too). While typing text or cropping,
+  Return and Esc end that first. Every editor key (tool letters, `⌘Z`, Delete)
+  works. The window editor and this one share `AnnotateToolbar`,
+  `AnnotateCanvas`, and `AnnotateKeys`.
 - Every screenshot goes to the clipboard as soon as it is taken, and again after
   markup Done (`CaptureSettings.copyToClipboard`, on by default; menu toggle
   "Copy Screenshots to Clipboard").
@@ -154,7 +187,10 @@ video editor.
   or Close All Cards (menu, or right-click a card). Cards slide in with a small
   bounce. A fullscreen capture shows the shot and closes it, so macOS plays the
   same shrink as the area overlay. No shutter sound.
-- No Restore Closed Card. A closed shot stays in `⇧⌘V` history.
+- No Restore Closed Card. A closed shot stays in `⇧⌘V` history. `⌘E` on an
+  image in that list opens the markup editor (saved marks stay editable); Done
+  updates the history item and its open card. `NaviClipboard` reaches capture
+  only through `ClipboardFeature.onAnnotate`, wired in the app.
 - `⌥⇧⌘N` opens the Navi menu at the mouse. The same menu shows from the
   menu bar icon. It is an AppKit `NSStatusItem` menu, built in `NaviMenu`.
 - Navi marks its own pasteboard writes with `NaviPasteboard.ownType`, so the
@@ -197,10 +233,15 @@ Xnapper's backgrounds, and macshot's auto-redact.
 | `docs/capture-plan.html` | Prototype, feature map, and plan |
 | `docs/upstream-hex.md` | Hex as the upstream for talk to type: feature map, sync steps |
 | `Packages/NaviDictation/Bench` | Dictation benchmark cases and saved results |
+| `docs/performance.md` | History performance: what `history-bench` times, how search and saves work, numbers |
+| `Packages/NaviClipboard/Bench` | Saved `history-bench` results |
 
 `Inbox` keeps items in `~/Library/Application Support/Navi/` (`history.json`
 plus `files/`). Items sort by pinned, then by `lastUsedAt`. The newest 200
-unpinned items stay. New fields on `CaptureItem` must decode from old history
+unpinned items stay. Saves run on a background queue (`HistoryWriter`); call
+`Inbox.flush()` before the process exits (`applicationWillTerminate` does).
+Search ignores case, accents and character width (`SearchCache`).
+New fields on `CaptureItem` must decode from old history
 files (use `decodeIfPresent` in `init(from:)`).
 
 ## Commands
@@ -208,15 +249,16 @@ files (use `decodeIfPresent` in `init(from:)`).
 ```sh
 xcodegen generate                       # after you change project.yml or add files
 ~/.local/bin/heavy -- xcodebuild -project Navi.xcodeproj -scheme Navi \
-  -configuration Debug -derivedDataPath build -quiet build
+  -configuration Debug -derivedDataPath build.noindex -quiet build
 cd Packages/NaviCore && swift test      # unit tests, run directly
 cd Packages/NaviCapture && swift test   # capture, markup, stitch, background tests
-NAVI_SNAPSHOTS=/tmp/navi-snaps swift test --filter EditorSnapshot  # in NaviCapture: draws the markup editor to PNGs (760/1000/1400 wide, dark and light) to check its look
+NAVI_SNAPSHOTS=/tmp/navi-snaps swift test --filter EditorSnapshot  # in NaviCapture: draws the markup editor to PNGs (760/1000/1400 wide, dark and light) and edit after capture (1440 × 900; NAVI_BACKDROP=<png> for a real screen behind it) to check their look
 NAVI_TOOLTIP_FRAMES=/tmp/navi-tips swift test --filter TooltipDemo  # in NaviCapture: records the toolbar tooltips as 30 fps PNG frames, for a video
 cd Packages/NaviRecording && swift test # recording math, GIF, audio mixdown
 cd Packages/NaviDictation && swift test # cleanup rules, fn gestures, fn setting, scoring
 cd Packages/NaviDictation && swift run dictation-bench [--audio [--speech apple,parakeet]] [--failures] [--save]
-pkill -x Navi; open build/Build/Products/Debug/Navi.app
+cd Packages/NaviClipboard && swift run -c release history-bench [--sizes 200,1000,5000] [--corpus ascii|mixed] [--save]  # History list benchmark
+scripts/dev.sh          # build and run Navi Dev in place of Navi (fresh: wipe it first; stop: back to Navi)
 ```
 
 Releases live on GitHub (`donovanhiland/navi` is public). Run
@@ -237,8 +279,19 @@ signed in to Xcode, and staples it. Output: `dist/Navi.zip`. Not
 TestFlight or the App Store: both need the app sandbox, which blocks the system
 shortcut and paste features.
 
-Signing uses the Apple Development certificate, team `77SAW76597`, set in
-`project.yml`. `App/Navi.entitlements` (generated from `project.yml`) holds the
+Test locally with `scripts/dev.sh`. It quits Navi, builds, and runs Navi Dev
+(they share shortcuts, so one runs at a time). `scripts/dev.sh fresh` wipes
+Navi Dev's permissions, settings, and history first, to test first-run setup.
+`scripts/dev.sh stop` quits Navi Dev and reopens Navi. Builds go to
+`build.noindex/` so Spotlight lists only the installed Navi. Navi Dev keeps its
+history in `~/Library/Application Support/Navi Dev`.
+
+Debug builds are a separate app, **Navi Dev** (`com.donovanhiland.navi.dev`),
+signed with the Apple Development certificate, team `77SAW76597`. Release
+builds are **Navi** (`com.donovanhiland.navi`), signed with Developer ID by
+Xcode's cloud signing during export (no Developer ID private key on this Mac).
+macOS ties permissions to the signature, so the two apps get separate
+permissions. Donovan's own copy is the release in `/Applications`. `App/Navi.entitlements` (generated from `project.yml`) holds the
 microphone and camera entitlements that the hardened runtime needs. Keep a stable signature so macOS keeps the Accessibility and
 Screen Recording permissions between builds.
 
