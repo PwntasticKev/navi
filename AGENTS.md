@@ -39,6 +39,9 @@ Desktop Icons). Not checked yet: the `⌥⇧⌘N` menu and a second display.
   shows it; drag a corner, an end, or anywhere on an edge to resize; the cursor
   shows what a drag does; the color and size pickers change the selected mark;
   the counter tool stays on for the next step; spotlight is a rounded box), `⌘Z`/`⇧⌘Z`/Delete through a local key monitor,
+  toolbar tooltips (`Annotate/Tooltip.swift`: one dark bubble drawn in a top layer, so no
+  button moves; the name and a small keycap; the first tip waits 0.45 s, then it glides
+  between buttons),
   rotate, flip, resize, crop, undo/redo, drop an image in to combine, a small
   picture of the shot to drag into any app (top right, beside Cancel and Done), Done updates the card and the history item. Marks stay editable in
   `<id>.navi` (JSON + base PNG) beside the Inbox file.
@@ -250,6 +253,7 @@ xcodegen generate                       # after you change project.yml or add fi
 cd Packages/NaviCore && swift test      # unit tests, run directly
 cd Packages/NaviCapture && swift test   # capture, markup, stitch, background tests
 NAVI_SNAPSHOTS=/tmp/navi-snaps swift test --filter EditorSnapshot  # in NaviCapture: draws the markup editor to PNGs (760/1000/1400 wide, dark and light) and edit after capture (1440 × 900; NAVI_BACKDROP=<png> for a real screen behind it) to check their look
+NAVI_TOOLTIP_FRAMES=/tmp/navi-tips swift test --filter TooltipDemo  # in NaviCapture: records the toolbar tooltips as 30 fps PNG frames, for a video
 cd Packages/NaviRecording && swift test # recording math, GIF, audio mixdown
 cd Packages/NaviDictation && swift test # cleanup rules, fn gestures, fn setting, scoring
 cd Packages/NaviDictation && swift run dictation-bench [--audio [--speech apple,parakeet]] [--failures] [--save]

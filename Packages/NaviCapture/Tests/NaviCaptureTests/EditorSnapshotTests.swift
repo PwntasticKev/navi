@@ -26,7 +26,8 @@ struct EditorSnapshotTests {
         model.pointerUp(from: CGPoint(x: 200, y: 150), to: CGPoint(x: 700, y: 450))
 
         for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
-            let view = NSHostingView(rootView: AnnotateView(model: model, onDone: {}, onCancel: {}))
+            let tips = TooltipCenter(activeID: Tip(title: AnnotationTool.rectangle.title, shortcut: "R").id)
+            let view = NSHostingView(rootView: AnnotateView(model: model, tips: tips, onDone: {}, onCancel: {}))
             view.appearance = NSAppearance(named: appearance)
             view.frame = CGRect(x: 0, y: 0, width: width, height: 420)
             view.layoutSubtreeIfNeeded()

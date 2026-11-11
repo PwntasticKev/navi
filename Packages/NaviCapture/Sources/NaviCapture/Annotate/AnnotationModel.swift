@@ -70,10 +70,7 @@ public enum AnnotationTool: String, CaseIterable, Codable, Sendable {
         return allCases.first { $0.shortcut == character }
     }
 
-    /// The tooltip with the tool's key, such as "Arrow (A)".
-    var helpWithShortcut: String { "\(help) (\(shortcut.uppercased()))" }
-
-    /// The tooltip: the name, and what the tool does when that is not clear from the name.
+    /// The name, and what the tool does when that is not clear from the name. VoiceOver reads it.
     var help: String {
         switch self {
         case .select: "Select: click a mark to move it, drag its handles to resize it"
