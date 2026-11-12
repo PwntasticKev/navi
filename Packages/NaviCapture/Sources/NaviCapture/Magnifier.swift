@@ -5,7 +5,7 @@ struct MagnifierStyle: Equatable, Sendable {
     let size: CGFloat
     let pixelCount: Int
 
-    static let standard = MagnifierStyle(size: 92, pixelCount: 11)
+    static let standard = MagnifierStyle(size: 76, pixelCount: 9)
     static let sizeRange: ClosedRange<CGFloat> = 64...200
     static let pixelRange: ClosedRange<Int> = 5...31
     static let pointsPerZoomStep: CGFloat = 24
@@ -49,7 +49,7 @@ struct MagnifierStyle: Equatable, Sendable {
 }
 
 enum MagnifierPlacement {
-    static let gap: CGFloat = 12
+    static let gap: CGFloat = 20
     static let margin: CGFloat = 4
     static let glideDuration: Double = 0.12
 

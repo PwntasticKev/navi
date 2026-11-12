@@ -14,20 +14,20 @@ import Testing
 
     @Test func dragUpGrowsAndDragRightZoomsIn() {
         let start = MagnifierStyle.standard
-        #expect(start.resized(by: CGVector(dx: 0, dy: 30)).size == 122)
+        #expect(start.resized(by: CGVector(dx: 0, dy: 30)).size == 106)
         #expect(start.resized(by: CGVector(dx: 0, dy: -30)).size == 64)
-        #expect(start.resized(by: CGVector(dx: 48, dy: 0)).pixelCount == 7)
-        #expect(start.resized(by: CGVector(dx: -24, dy: 0)).pixelCount == 13)
+        #expect(start.resized(by: CGVector(dx: 48, dy: 0)).pixelCount == 5)
+        #expect(start.resized(by: CGVector(dx: -24, dy: 0)).pixelCount == 11)
         #expect(start.resized(by: CGVector(dx: 5, dy: 0)) == start)
     }
 
     @Test func dragPastTheLimitsDoesNotBuildUp() {
         let start = MagnifierStyle.standard
         let clamped = start.clampedDrag(CGVector(dx: 1000, dy: 300))
-        #expect(clamped == CGVector(dx: 72, dy: 108))
+        #expect(clamped == CGVector(dx: 48, dy: 124))
         #expect(start.resized(by: clamped) == MagnifierStyle(size: 200, pixelCount: 5))
         let back = start.clampedDrag(CGVector(dx: -1000, dy: -300))
-        #expect(back == CGVector(dx: -240, dy: -28))
+        #expect(back == CGVector(dx: -264, dy: -12))
         #expect(start.resized(by: back) == MagnifierStyle(size: 64, pixelCount: 31))
     }
 
@@ -53,7 +53,7 @@ import Testing
         let frame = MagnifierPlacement.frame(
             for: CGPoint(x: 100, y: 300), panel: CGSize(width: 92, height: 114), side: CGVector(dx: 1, dy: -1)
         )
-        #expect(frame == CGRect(x: 112, y: 174, width: 92, height: 114))
+        #expect(frame == CGRect(x: 120, y: 166, width: 92, height: 114))
     }
 
     @Test func pixelsStayCenteredAtImageEdges() {
@@ -137,7 +137,7 @@ import Testing
         let small = MagnifierFooterLayout(width: MagnifierStyle.sizeRange.lowerBound, hexWidth: hex, coordinatesWidth: coordinates)
         #expect(MagnifierFooterLayout.inset * 2 + hex <= MagnifierStyle.sizeRange.lowerBound)
         #expect(small.showsSwatch == false && small.showsCoordinates == false)
-        let standard = MagnifierFooterLayout(width: 92, hexWidth: hex, coordinatesWidth: coordinates)
+        let standard = MagnifierFooterLayout(width: MagnifierStyle.standard.size, hexWidth: hex, coordinatesWidth: coordinates)
         #expect(standard.showsSwatch == true && standard.showsCoordinates == false)
         let wide = MagnifierFooterLayout(width: 150, hexWidth: hex, coordinatesWidth: coordinates)
         #expect(wide.showsSwatch == true && wide.showsCoordinates == true)
