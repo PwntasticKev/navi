@@ -3,8 +3,6 @@ import Testing
 
 @testable import NaviCapture
 
-/// The pointer in the markup editor while a drag is under way and right after it ends.
-/// Hover events stop during a drag, so the drag itself must set the pointer.
 @MainActor
 @Suite struct AnnotateCursorTests {
     private func makeModel() throws -> AnnotateModel {
@@ -60,9 +58,7 @@ import Testing
         draw(.rectangle, in: model, from: CGPoint(x: 50, y: 50), to: end)
         model.pointerMoved(to: end)
         #expect(model.tool == .select)
-        // The mouse rests on the new mark's corner handle.
         #expect(model.hoverPointer == .resize(.bottomRight))
-        // Off the mark, the plain arrow, not the last handle's arrows.
         model.pointerMoved(to: CGPoint(x: 300, y: 250))
         #expect(model.hoverPointer == .arrow)
     }

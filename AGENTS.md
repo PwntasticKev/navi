@@ -58,7 +58,11 @@ Desktop Icons). Not checked yet: the `⌥⇧⌘N` menu and a second display.
   `SpeechAnalyzer` or `SFSpeechRecognizer` until the Parakeet model is loaded.
   The model, about 0.5 GB, downloads on first start to
   `~/Library/Application Support/FluidAudio/Models`), cleanup with Foundation Models or rules, paste at the
-  cursor, then the old clipboard comes back. Speed: the pill shows on the
+  cursor, then the old clipboard comes back (marked as Navi's, so the
+  history does not list the old copy again above the dictation). Each
+  dictation is a `.dictation` item in the shared history. `⌥⇧V` (Hex's
+  default, and a menu item; only while talk to type is on) pastes the last
+  dictation again. Speed: the pill shows on the
   press. By default (like Wispr Flow) the mic is set up ahead of time but off,
   so there is no mic dot between dictations; a press only starts it. "Keep
   Microphone Ready" (menu, off by default; Hex's "Keep ready") keeps the mic
@@ -66,9 +70,19 @@ Desktop Icons). Not checked yet: the `⌥⇧⌘N` menu and a second display.
   dot). The mic is an input-only AUHAL unit on the default input, like Hex
   (cpal). Not `AVAudioEngine`: it joins the mic and the speakers in a hidden
   aggregate device, which changes music and cuts it out when it stops.
-  Recording runs 200 ms past the release so
-  the last word is kept. The cleanup model session is pre-warmed. Timings log
-  under the `Dictation` category ("Release to text: … ms"). fn with another key (fn+⌫,
+  After the release, recording runs on until
+  200 ms of quiet (at least 40 ms, at most 600 ms), so the last word is kept and
+  a user who already stopped talking waits only 40 ms. Speech and cleanup run
+  while the user talks (`LiveDictation`): about once a second, and when the user
+  goes quiet, Parakeet transcribes the audio after the last finished sentence. A
+  sentence is finished when another one follows it with a real pause (found in
+  the audio); it is cleaned in the background and later passes start after the
+  pause. When nothing was said after the newest pass, the release reuses it, so
+  the text is often ready at once. Cleanup is per sentence: rules, then Apple's
+  model only for sentences that need it (`TextCleaner.needsModel`: corrections,
+  lists, spoken punctuation, filler words rules keep, repeats, long sentences
+  with no commas). Timings log under the `Dictation` category ("Release to
+  text: … ms", "Live: …"). fn with another key (fn+⌫,
   fn+arrows) never dictates. The first launch asks before it uses fn. When on,
   Navi borrows the fn key setting (`AppleFnUsageType` = 0, "Do Nothing", applied
   with `activateSettings -u`) while it runs and puts it back on quit.
@@ -132,7 +146,7 @@ video editor.
   is the only button that starts a recording. `⇧⌘4` still captures as soon
   as the drag ends.
 - Other hotkeys: `⌥⇧⌘4` scrolling capture, `⌥⇧⌘T` capture text, `⌥⇧⌘5` record
-  (press again to stop).
+  (press again to stop), `⌥⇧V` paste last dictation.
 - Shots leave out Navi's overlays, cards, pins, and pills (window layer above 0)
   but keep Navi's normal windows, such as the markup editor.
 - The selection overlay is a non-activating panel: it takes Esc, Space, and the
@@ -221,7 +235,9 @@ video editor.
 
 - **Maccy (clipboard):** keyboard only. Hotkey, type to filter, Return to paste,
   `⌘1`–`⌘9`, `⌥P` pin, `⌥⌫` delete, `⌥⌘⌫` clear, a preview card beside the
-  selected row. Line breaks show as `⏎`.
+  selected row. Line breaks show as `⏎`. Navi adds scope chips under the
+  search field (All, Text, Images, Dictation); Tab and ⇧Tab move between them,
+  and each open starts at All. Images include screenshots and recordings.
 - **CleanShot X (capture):** crosshair with magnifier and pixel size, snap to
   windows, freeze screen. Corner card: on hover it blurs and shows round Copy and
   Save buttons. Corners: Pin (top left), Close (top right), Annotate or Trim
@@ -259,7 +275,8 @@ Xnapper's backgrounds, and macshot's auto-redact.
 
 `Inbox` keeps items in `~/Library/Application Support/Navi/` (`history.json`
 plus `files/`). Items sort by pinned, then by `lastUsedAt`. The newest 200
-unpinned items stay. Saves run on a background queue (`HistoryWriter`); call
+unpinned items stay, and separately the newest 200 unpinned dictations
+(`dictationLimit`), so dictation does not push out clips and captures. Saves run on a background queue (`HistoryWriter`); call
 `Inbox.flush()` before the process exits (`applicationWillTerminate` does).
 Search ignores case, accents and character width (`SearchCache`).
 New fields on `CaptureItem` must decode from old history
@@ -278,8 +295,12 @@ NAVI_TOOLTIP_FRAMES=/tmp/navi-tips swift test --filter TooltipDemo  # in NaviCap
 cd Packages/NaviRecording && swift test # recording math, GIF, audio mixdown
 cd Packages/NaviDictation && swift test # cleanup rules, fn gestures, fn setting, scoring
 cd Packages/NaviDictation && swift run dictation-bench [--audio [--speech apple,parakeet]] [--failures] [--save]
+cd Packages/NaviDictation && swift run -c release dictation-bench --latency [--failures]  # release-to-text time for 3 s to 60 s dictations, live and not
 cd Packages/NaviClipboard && swift run -c release history-bench [--sizes 200,1000,5000] [--corpus ascii|mixed] [--save]  # History list benchmark
-scripts/tests/run.sh    # release script tests (plan, notes HTML, Sparkle signature checker)
+NAVI_HISTORY_SNAPSHOTS=/tmp/navi-history swift test --filter HistorySnapshot  # in NaviClipboard: draws the ⇧⌘V panel to PNGs (each scope, and the order after a dictation)
+swift scripts/comments.swift [--fix]  # fails on any comment in Swift code; --fix removes them
+scripts/tests/run.sh    # release script tests (plan, notes HTML, Sparkle signature checker, PR title)
+scripts/pr-title-check.sh "fix(capture): …"  # checks a PR title the way CI does
 MODE=dry-run VERSION=9.9.9 BUILD=1 NOTES=x SKIP_TESTS=1 scripts/ci-release.sh  # release without Apple keys; nothing published
 scripts/dev.sh          # build and run Navi Dev in place of Navi (fresh: wipe it first; stop: back to Navi)
 ```
@@ -327,6 +348,28 @@ them up and is the one status to require. `CONTRIBUTING.md` and
 `.github/pull_request_template.md` say what a PR needs (one problem, Problem /
 Change / Verification, screenshots for UI).
 
+### Commits and PR titles
+
+The repo allows only squash merges. The PR title becomes the one commit on
+`main` and one line in the release notes, with ` (#<number>)` added. The PR
+body becomes the commit body.
+
+- PR title: `type(scope): what changed`, in plain words a user understands.
+  Example: `fix(capture): area shots keep the last pixel row`.
+- Types: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `ci`, `build`,
+  `chore`, `revert`. Scope is optional: lowercase letters, digits, dashes,
+  such as `capture`, `history`, `dictation`, `recording`, `release`.
+- Describe the result, not the work: "area shots keep the last pixel row", not
+  "update CaptureGeometry".
+- 100 characters or fewer, no period at the end. `!` after the scope marks a
+  change that breaks something.
+- The `PR title` workflow (`.github/workflows/pr-title.yml`) runs
+  `scripts/pr-title-check.sh` when a PR opens or its title changes. Run the
+  script before you open a PR.
+- Commits inside a PR are squashed, so their messages are not checked. Use the
+  same format for them anyway.
+- `chore(release):` lines are left out of the release notes.
+
 Share
 `https://github.com/donovanhiland/navi/releases/latest/download/Navi.zip`.
 Navi checks `…/releases/latest/download/appcast.xml` daily and from "Check for
@@ -359,6 +402,9 @@ Screen Recording permissions between builds.
 
 ## Rules
 
+- No comments in Swift code. CI runs `swift scripts/comments.swift` and fails on any
+  comment. Allowed: `// swift-tools-version` in `Package.swift`, and a license header at
+  the top of a file (it must say Copyright and License).
 - `@MainActor` on UI and state types. Swift 6 strict concurrency must build
   with no warnings.
 - Put pure logic in packages with unit tests (Swift Testing). Test `NaviCore`
