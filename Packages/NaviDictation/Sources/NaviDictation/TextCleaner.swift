@@ -3,13 +3,26 @@ import FoundationModels
 import os
 
 struct TextCleaner: Sendable {
-    var modelTimeout: Duration = .seconds(4)
+    var modelTimeout: Duration = .seconds(2)
 
     private static let logger = Logger(subsystem: "com.donovanhiland.navi", category: "TextCleaner")
 
     func clean(_ raw: String) async -> String {
+        let sentences = Sentences.split(raw.replacingOccurrences(of: "\n", with: " "))
+        let cleaned = await withTaskGroup(of: (Int, String).self) { group in
+            for (index, sentence) in sentences.enumerated() {
+                group.addTask { (index, await cleanSentence(sentence)) }
+            }
+            var results = [String](repeating: "", count: sentences.count)
+            for await (index, text) in group { results[index] = text }
+            return results
+        }
+        return Sentences.join(cleaned)
+    }
+
+    func cleanSentence(_ raw: String) async -> String {
         let basic = TextCleanup.clean(raw)
-        guard !basic.isEmpty else { return basic }
+        guard !basic.isEmpty, Self.needsModel(basic) else { return basic }
         guard #available(macOS 26.0, *), Self.modelIsReady else { return basic }
 
         let timeout = modelTimeout
@@ -26,6 +39,28 @@ struct TextCleaner: Sendable {
         guard let polished, Self.isPlausible(polished, comparedTo: basic) else { return basic }
         return polished
     }
+
+
+    private static let needsModelPatterns: [String] = [
+        #"\b(?:actually|no wait|wait no|i mean|scratch that|sorry|or rather|make that|no,? (?:make it|it's|its))\b"#,
+        #"\b(?:number (?:one|two|three|four|five|\d)|firstly|secondly|thirdly|bullet(?: point)?|new line|next line|new paragraph|to do|todo)\b"#,
+        #"\b(?:first|second|third)(?:,|\s+(?:we|i|you|let's|call|send|check|make|get|go|do|buy|add|fix))"#,
+        #"\b(?:comma|period|full stop|question mark|exclamation (?:point|mark)|colon|semicolon|open quote|close quote|dash)\b"#,
+        #"\b(?:like|you know|basically|kind of|sort of|i guess|literally|so yeah|right so|okay so|so um)\b"#,
+        #"\b(\w+(?:\s+\w+){0,2})\s+\1\b"#,
+        #"\b(?:dot (?:com|swift|js|ts|json|md|py|io|app|dev|org|net)|camel case|snake case|kebab case|all caps)\b"#,
+    ]
+
+    static func needsModel(_ sentence: String) -> Bool {
+        let lowered = sentence.lowercased()
+        for pattern in needsModelPatterns
+        where lowered.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil {
+            return true
+        }
+        let words = sentence.split(whereSeparator: \.isWhitespace).count
+        return words >= 16 && !sentence.contains(where: { ",;:".contains($0) })
+    }
+
 
     static var modelIsAvailable: Bool {
         guard #available(macOS 26.0, *) else { return false }

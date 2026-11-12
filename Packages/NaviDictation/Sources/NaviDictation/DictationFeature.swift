@@ -10,7 +10,6 @@ public final class DictationFeature {
 
     private let inbox: Inbox
     private let pill = DictationPill()
-    private let cleaner = TextCleaner()
     private let microphone = Microphone()
     private var monitor: FnKeyMonitor?
     private var session: Session?
@@ -143,7 +142,9 @@ public final class DictationFeature {
         let (stream, continuation) = AsyncStream<AudioChunk>.makeStream()
         let transcription = Task.detached { () -> String in
             let engine = await SpeechEngines.best()
-            return try await engine.transcribe(audio: stream)
+            if engine is ParakeetEngine { return try await LiveDictation().transcribe(audio: stream) }
+            let raw = try await engine.transcribe(audio: stream)
+            return await TextCleaner().clean(raw)
         }
         let app = NSWorkspace.shared.frontmostApplication
         let session = Session(
@@ -199,20 +200,19 @@ public final class DictationFeature {
                 isProcessing = false
                 updateMicrophone()
             }
-            try? await Task.sleep(for: Microphone.releaseTail)
+            await microphone.waitForReleaseTail(releasedAt: released)
+            let tail = ContinuousClock.now - released
             microphone.endCapture()
-            let raw: String
+            let text: String
             do {
-                raw = try await session.transcription.value
+                text = try await session.transcription.value
             } catch {
                 Self.logger.error("Speech failed: \(error.localizedDescription)")
-                raw = ""
+                text = ""
             }
-            let heard = ContinuousClock.now
-            let text = await cleaner.clean(raw)
             pill.hide()
             Self.logger.info(
-                "Release to text: \((ContinuousClock.now - released).milliseconds) ms (speech \((heard - released).milliseconds) ms, cleanup \((ContinuousClock.now - heard).milliseconds) ms)"
+                "Release to text: \((ContinuousClock.now - released).milliseconds) ms (tail \(tail.milliseconds) ms)"
             )
             guard !text.isEmpty else { return }
             guard TextInserter.hasAccessibility else {
@@ -266,8 +266,4 @@ extension TextInserter {
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
     }
-}
-
-private extension Duration {
-    var milliseconds: Int { Int(components.seconds * 1000 + components.attoseconds / 1_000_000_000_000_000) }
 }
