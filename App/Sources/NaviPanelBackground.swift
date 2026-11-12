@@ -1,7 +1,5 @@
 import AppKit
 
-/// The blurred menu background with rounded corners for the app's floating panels (the shortcut
-/// recorder, Settings). The History panel in `NaviClipboard` draws the same look.
 @MainActor
 enum NaviPanelBackground {
     static func make(cornerRadius: CGFloat, material: NSVisualEffectView.Material = .menu) -> NSVisualEffectView {

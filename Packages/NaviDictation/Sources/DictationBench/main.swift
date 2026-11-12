@@ -2,15 +2,6 @@ import DictationEval
 import Foundation
 import NaviDictation
 
-// Usage:
-//   swift run dictation-bench [--engines none,rules,apple] [--audio] [--score outputs.json]... [--save] [--failures]
-//
-// --engines   cleanup engines to compare (default: rules,apple)
-// --audio     speak each case with `say`, transcribe it, then clean it. Also prints the speech word error rate.
-// --speech    speech engines for --audio: best, apple, parakeet (default: apple,parakeet)
-// --score     score outputs from another app. File: {"engine": "wispr", "outputs": {"<case id>": "<text>"}}
-// --save      write each run to Bench/results/<date> <engine>.json
-// --failures  print every case that did not pass
 
 let packageRoot = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 let casesURL = packageRoot.appending(path: "Bench/cases.json")
@@ -36,6 +27,11 @@ var arguments = Array(CommandLine.arguments.dropFirst())
     return found
 }
 
+if flag("--latency") {
+    try await Latency.run(verbose: flag("--failures"))
+    exit(0)
+}
+
 let useAudio = flag("--audio")
 let speeches = (values("--speech").first ?? "apple,parakeet")
     .split(separator: ",")
@@ -53,9 +49,6 @@ if engines.contains(.apple), !DictationPipeline.appleModelIsReady {
     print("Note: Apple's model is not ready on this Mac, so \"apple\" gives the rules result.")
 }
 
-// MARK: Inputs (typed, or spoken and transcribed)
-
-/// Input text per case, for each input source ("typed", or a speech engine name).
 var inputSets: [(name: String, inputs: [String: String])] = []
 if useAudio {
     let folder = FileManager.default.temporaryDirectory.appending(path: "dictation-bench-audio")
@@ -106,8 +99,6 @@ if useAudio {
 } else {
     inputSets.append(("typed", Dictionary(uniqueKeysWithValues: cases.map { ($0.id, $0.input) })))
 }
-
-// MARK: Runs
 
 var runs: [BenchRun] = []
 for (source, inputs) in inputSets {

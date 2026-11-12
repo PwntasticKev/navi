@@ -1,17 +1,14 @@
 import AppKit
 import NaviCapture
 import NaviCore
+import NaviDictation
 
-/// The Navi menu. It shows from the menu bar icon, and at the mouse with `⌥⇧⌘N`, which still works
-/// when the icon is hidden behind the notch.
 @MainActor
 final class NaviMenu: NSObject, NSMenuDelegate {
     private unowned let app: AppDelegate
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let menu = NSMenu()
-    /// The top-left corner of the menu the last time it opened, in screen points. Settings opens there.
     private var menuTopLeft: CGPoint = .zero
-    /// True while the menu opens at the mouse (`⌥⇧⌘N`) rather than from the menu bar icon.
     private var opensAtMouse = false
 
     init(app: AppDelegate) {
@@ -22,7 +19,6 @@ final class NaviMenu: NSObject, NSMenuDelegate {
         statusItem.menu = menu
     }
 
-    /// Opens the menu at the mouse.
     func popUpAtMouse() {
         NSApp.activate()
         opensAtMouse = true
@@ -30,7 +26,6 @@ final class NaviMenu: NSObject, NSMenuDelegate {
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 
-    /// Notes where the menu's top-left corner is: at the mouse, or under the menu bar icon.
     func menuWillOpen(_ menu: NSMenu) {
         if !opensAtMouse, let frame = statusItem.button?.window?.frame {
             menuTopLeft = CGPoint(x: frame.minX, y: frame.minY)
@@ -39,7 +34,6 @@ final class NaviMenu: NSObject, NSMenuDelegate {
         }
     }
 
-    /// Rebuilds the items each time the menu opens, so the checkmarks are current.
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let capture = app.capture
@@ -62,6 +56,11 @@ final class NaviMenu: NSObject, NSMenuDelegate {
         } else {
             menu.addItem(item("Record Screen…", key: "5", [.command, .shift, .option]) { capture.pickRecordingRegion() })
         }
+        if app.dictation.isEnabled {
+            menu.addItem(item("Paste Last Dictation", key: "v", [.shift, .option]) { [app] in
+                app.dictation.pasteLastDictation()
+            })
+        }
         menu.addItem(.separator())
         menu.addItem(item("Close All Cards") { capture.closeAllCards() })
         if capture.hasPins {
@@ -78,7 +77,6 @@ final class NaviMenu: NSObject, NSMenuDelegate {
         menu.addItem(item("Quit Navi", key: "q", .command) { NSApp.terminate(nil) })
     }
 
-    /// A menu item that shows `combo`. A one-character key uses the native key equivalent; other keys go in the title.
     private func shortcutItem(
         _ title: String, _ combo: KeyCombo, action: @escaping @MainActor () -> Void
     ) -> NSMenuItem {
@@ -86,7 +84,6 @@ final class NaviMenu: NSObject, NSMenuDelegate {
         return item(title, key: combo.keyName.lowercased(), combo.cocoaModifiers, action: action)
     }
 
-    /// A menu item that runs `action`. `key` only shows the shortcut; the global hot keys do the work.
     private func item(
         _ title: String, key: String = "", _ modifiers: NSEvent.ModifierFlags = [], on: Bool? = nil,
         action: @escaping @MainActor () -> Void
@@ -99,7 +96,6 @@ final class NaviMenu: NSObject, NSMenuDelegate {
     }
 }
 
-/// A menu item with a closure.
 @MainActor
 private final class ActionMenuItem: NSMenuItem {
     private let handler: @MainActor () -> Void

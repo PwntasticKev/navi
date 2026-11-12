@@ -7,14 +7,11 @@ import QuartzCore
 import SwiftUI
 import os
 
-/// A borderless panel that takes key focus without making Navi the active app, like the History panel.
 private final class SettingsWindow: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 }
 
-/// The Settings panel, opened from the Navi menu (`⌘,`). It holds every on/off setting, the History
-/// shortcut, and the permissions, so the menu keeps only actions. Esc, ⌘W, or clicking away closes it.
 @MainActor
 final class SettingsPanel: NSObject, NSWindowDelegate {
     private unowned let app: AppDelegate
@@ -27,13 +24,11 @@ final class SettingsPanel: NSObject, NSWindowDelegate {
     private var monitor: Any?
     private var isOpen = false
     private let logger = Logger(subsystem: "com.donovanhiland.navi", category: "Settings")
-    /// Goes up on every open and close, so a fade that finishes late does not hide a panel opened again.
     private var generation = 0
 
     private enum Motion {
         static let openDuration: TimeInterval = 0.16
         static let closeDuration: TimeInterval = 0.1
-        /// How far the panel drops while it fades in, in points.
         static let drop: CGFloat = 4
     }
 
@@ -43,13 +38,10 @@ final class SettingsPanel: NSObject, NSWindowDelegate {
         configure()
     }
 
-    /// Builds the panel ahead of time, so the first open does not pay for the SwiftUI layout.
     func prepare() {
         _ = panel
     }
 
-    /// Opens the panel with its top-left corner at `anchor` (where the Navi menu was), kept on screen,
-    /// or brings it forward. It fades in and drops a few points; with Reduce Motion it only fades.
     func show(at anchor: CGPoint) {
         model.refresh()
         let panel = panel
@@ -75,7 +67,6 @@ final class SettingsPanel: NSObject, NSWindowDelegate {
         }
     }
 
-    /// Fades the panel out and hides it. The panel is kept for the next open. Safe to call more than once.
     func close() {
         guard isOpen else { return }
         isOpen = false
@@ -90,7 +81,6 @@ final class SettingsPanel: NSObject, NSWindowDelegate {
             panel.animator().alphaValue = 0
         } completionHandler: { [weak self] in
             Task { @MainActor in
-                // A reopen during the fade wins.
                 guard let self, self.generation == closing else { return }
                 panel.orderOut(nil)
             }
@@ -111,7 +101,6 @@ final class SettingsPanel: NSObject, NSWindowDelegate {
 
     private static func makePanel(model: SettingsModel) -> NSPanel {
         let hosting = NSHostingView(rootView: SettingsView(model: model))
-        // A borderless panel has no title bar; without this the view leaves room for one at the top.
         hosting.safeAreaRegions = []
         let size = hosting.fittingSize
         let container = NaviPanelBackground.make(cornerRadius: SettingsMetrics.cornerRadius)
@@ -139,7 +128,6 @@ final class SettingsPanel: NSObject, NSWindowDelegate {
         return panel
     }
 
-    /// The frame of `size` with its top-left corner at `topLeft`, moved to stay inside that screen.
     private static func frame(size: CGSize, topLeft: CGPoint) -> CGRect {
         let screen = NSScreen.screens.first { NSMouseInRect(topLeft, $0.frame, false) } ?? NSScreen.main
         var origin = CGPoint(x: topLeft.x, y: topLeft.y - size.height)
@@ -150,7 +138,6 @@ final class SettingsPanel: NSObject, NSWindowDelegate {
         return CGRect(origin: CGPoint(x: origin.x.rounded(), y: origin.y.rounded()), size: size)
     }
 
-    /// Esc and ⌘W close the panel. Returns true when the key was used.
     private func handle(_ event: NSEvent) -> Bool {
         let isCloseKey = event.keyCode == UInt16(kVK_Escape)
             || (event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "w")
@@ -159,18 +146,14 @@ final class SettingsPanel: NSObject, NSWindowDelegate {
         return true
     }
 
-    /// Clicking away closes the panel, like the History panel and the shortcut recorder.
     func windowDidResignKey(_ notification: Notification) {
         logger.info("Settings lost key focus")
         close()
     }
 
-    /// Coming back to the panel (for example from System Settings) reads the permissions again.
     func windowDidBecomeKey(_ notification: Notification) {
         model.refresh()
     }
-
-    // MARK: Model
 
     private func configure() {
         model.capture = captureToggles()

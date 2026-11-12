@@ -1,23 +1,17 @@
 import SwiftUI
 
-/// What the Settings panel reads and changes. The app fills it in, so the view stays free of feature types.
-/// Getters are read again whenever `revision` changes, because some settings live in `UserDefaults` and
-/// are not observable.
 @Observable
 @MainActor
 final class SettingsModel {
-    /// One on/off setting.
     struct Toggle: Identifiable {
         let id: String
         let title: String
         var detail: String?
         let get: @MainActor () -> Bool
         let set: @MainActor (Bool) -> Void
-        /// False greys the row out, for example when talk to type is off.
         var isEnabled: @MainActor () -> Bool = { true }
     }
 
-    /// One permission and how to ask for it.
     struct Permission: Identifiable {
         let id: String
         let title: String
@@ -32,7 +26,6 @@ final class SettingsModel {
     var changeHistoryShortcut: @MainActor () -> Void = {}
     var clearHistory: @MainActor () -> Void = {}
     var checkForUpdates: @MainActor () -> Void = {}
-    /// Goes up after every change, and when the panel comes forward, so the rows read fresh values.
     private(set) var revision = 0
 
     func refresh() { revision += 1 }
@@ -55,26 +48,20 @@ final class SettingsModel {
     }
 }
 
-/// Layout numbers for the Settings panel. It is drawn like an open macOS menu: plain rows, section
-/// titles, separators, and a rounded highlight under the row the mouse is on.
 enum SettingsMetrics {
     static let width: CGFloat = 320
     static let cornerRadius: CGFloat = 10
-    /// Gap between the panel edge and a row's highlight, like `NSMenu`.
     static let highlightInset: CGFloat = 5
     static let highlightRadius: CGFloat = 5
-    /// Gap between the highlight edge and the row's text.
     static let textInset: CGFloat = 9
     static let rowMinHeight: CGFloat = 24
     static let rowVerticalPadding: CGFloat = 4
     static let verticalPadding: CGFloat = 5
-    /// Quick and calm: state changes in the panel settle within a tenth of a second or so.
     static let stateAnimation = Animation.easeOut(duration: 0.12)
     static let hoverAnimation = Animation.easeOut(duration: 0.08)
     static let clearedFeedback: Duration = .milliseconds(1200)
 }
 
-/// The Settings panel. It pops up where the Navi menu was and looks like that menu, with switches.
 struct SettingsView: View {
     let model: SettingsModel
     @State private var showsCleared = false
@@ -93,7 +80,6 @@ struct SettingsView: View {
         }
         .padding(.vertical, SettingsMetrics.verticalPadding)
         .frame(width: SettingsMetrics.width)
-        // Rows keep their natural height; the panel is sized to fit them, never the other way round.
         .fixedSize(horizontal: false, vertical: true)
         .font(.system(size: 13))
     }
@@ -166,7 +152,6 @@ struct SettingsView: View {
         }
     }
 
-    /// Clears the history and shows "Cleared" for a moment in place of the button.
     private func clear() {
         model.clearHistory()
         showsCleared = true
@@ -191,7 +176,6 @@ struct SettingsView: View {
     }
 }
 
-/// One menu-style row. `highlights` shows the rounded hover highlight, for rows a click acts on.
 private struct MenuRow<Content: View>: View {
     var highlights = false
     var isEnabled = true
@@ -213,8 +197,6 @@ private struct MenuRow<Content: View>: View {
     }
 }
 
-/// One on/off row: title, an optional line under it, and a small switch.
-/// A click anywhere on the row flips the switch, so the target is the full row, not only the small switch.
 private struct ToggleRow: View {
     let toggle: SettingsModel.Toggle
     let isOn: Binding<Bool>
@@ -250,8 +232,6 @@ private struct ToggleRow: View {
     }
 }
 
-/// A small switch drawn in SwiftUI. The AppKit switch draws grey when Navi is not the active app, which
-/// it never is while this panel is open, so "on" would look the same as "off".
 private struct MiniSwitch: View {
     let isOn: Bool
 
@@ -268,7 +248,6 @@ private struct MiniSwitch: View {
     }
 }
 
-/// A shortcut drawn as a small keycap, like the "esc" hint in the shortcut recorder.
 private struct KeyHint: View {
     let text: String
 

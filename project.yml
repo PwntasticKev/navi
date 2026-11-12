@@ -73,3 +73,7 @@ targets:
         Debug:
           PRODUCT_BUNDLE_IDENTIFIER: com.donovanhiland.navi.dev
           PRODUCT_NAME: Navi Dev
+        # Releases are signed with Developer ID. Set here, on the app target only: a command-line
+        # identity would also apply to package resource bundles, which Xcode then rejects.
+        Release:
+          CODE_SIGN_IDENTITY: "Developer ID Application"
