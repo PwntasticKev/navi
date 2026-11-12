@@ -137,6 +137,9 @@ video editor.
   but keep Navi's normal windows, such as the markup editor.
 - The selection overlay is a non-activating panel: it takes Esc, Space, and the
   mouse without activating Navi, so an open markup editor is not raised.
+  Because Navi stays in the background, the overlay turns on the window
+  server's `SetsCursorInBackground` (`BackgroundCursor`) while it is up, or
+  macOS would keep the normal pointer instead of the crosshair.
 - The area magnifier is a 76 pt rounded square, 9 pixels across, 20 pt right
   of and below the cursor, with a hex color strip. It glides to the other side
   at a display edge. Right-drag: up/down resizes it, left/right zooms. Both

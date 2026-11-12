@@ -57,6 +57,7 @@ final class SelectionSession {
     }
 
     func begin() {
+        BackgroundCursor.setEnabled(true)
         let mouseScreen = NSScreen.underMouse
         for overlay in overlays {
             overlay.orderFrontRegardless()
@@ -173,6 +174,8 @@ final class SelectionSession {
         }
         modeBar?.orderOut(nil)
         overlays = []
+        NSCursor.arrow.set()
+        BackgroundCursor.setEnabled(false)
         modeBar = nil
         let completion = completion
         self.completion = nil
@@ -466,9 +469,12 @@ final class OverlayView: NSView {
         resetDrag()
         session?.hideEarly()
         let finish = { [weak self] in
-            guard let self, let captured else { return }
+            guard let self else { return }
             let pixels = CaptureGeometry.pixelRect(forSelection: selection, viewSize: bounds.size, imageSize: imageSize)
-            guard let cropped = captured.image.cropping(to: pixels) else { return }
+            guard let captured, let cropped = captured.image.cropping(to: pixels) else {
+                session?.finish(.cancelled)
+                return
+            }
             let area = CaptureGeometry.viewRect(forPixels: pixels, viewSize: bounds.size, imageSize: imageSize)
             let topLeft = CGRect(x: area.minX, y: bounds.height - area.maxY, width: area.width, height: area.height)
             session?.finish(.area(CapturedImage(image: cropped, scale: captured.scale), screen, rect: topLeft))
