@@ -151,6 +151,9 @@ video editor.
   but keep Navi's normal windows, such as the markup editor.
 - The selection overlay is a non-activating panel: it takes Esc, Space, and the
   mouse without activating Navi, so an open markup editor is not raised.
+  Because Navi stays in the background, the overlay turns on the window
+  server's `SetsCursorInBackground` (`BackgroundCursor`) while it is up, or
+  macOS would keep the normal pointer instead of the crosshair.
 - The selection overlay shows at once over the live screen. The frozen screen
   images arrive about 0.2 s later and are what gets cropped; a selection that
   ends first waits for them, off screen. The overlay leaves the screen on mouse
