@@ -11,7 +11,7 @@ let package = Package(
     dependencies: [.package(path: "../NaviCore")],
     targets: [
         .target(name: "NaviClipboard", dependencies: ["NaviCore"]),
-        /// `swift run -c release history-bench`: times the History list on synthetic histories.
         .executableTarget(name: "HistoryBench", dependencies: ["NaviClipboard", "NaviCore"]),
+        .testTarget(name: "NaviClipboardTests", dependencies: ["NaviClipboard", "NaviCore"]),
     ]
 )

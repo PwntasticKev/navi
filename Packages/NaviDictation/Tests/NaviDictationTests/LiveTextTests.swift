@@ -12,7 +12,6 @@ struct LiveTextTests {
 
     @Test("long audio keeps only the newest window")
     func longAudio() {
-        // 20 buffers of 1 s each, 5 s window: the last 5 buffers.
         let start = LiveText.tailStart(frameCounts: Array(repeating: 100, count: 20), sampleRate: 100, window: 5)
         #expect(start.index == 15)
         #expect(start.clipped)

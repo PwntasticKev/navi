@@ -15,10 +15,6 @@ import FluidAudio
 import Foundation
 import os
 
-/// Parakeet TDT v3 speech-to-text on the Neural Engine, through FluidAudio. Hex's default engine.
-///
-/// The model (about 0.5 GB) downloads once from Hugging Face, then everything runs on this Mac.
-/// Until it is ready, the app uses Apple's speech engine.
 actor ParakeetModel {
     static let shared = ParakeetModel()
     static let version: AsrModelVersion = .v3
@@ -26,18 +22,15 @@ actor ParakeetModel {
     private static let logger = Logger(subsystem: "com.donovanhiland.navi", category: "Parakeet")
     private var manager: AsrManager?
     private var loading: Task<AsrManager, any Error>?
-    /// One transcription at a time: `AsrManager` awaits inside a run, so calls could interleave.
     private var isBusy = false
     private var waiting: [CheckedContinuation<Void, Never>] = []
 
-    /// True when the model files are on disk. Loading them still takes a moment.
     nonisolated static var isDownloaded: Bool {
         AsrModels.modelsExist(at: AsrModels.defaultCacheDirectory(for: version), version: version)
     }
 
     var isLoaded: Bool { manager != nil }
 
-    /// Downloads (first time only) and loads the model. Safe to call many times.
     @discardableResult
     func prepare() async throws -> AsrManager {
         if let manager { return manager }
@@ -62,28 +55,32 @@ actor ParakeetModel {
         }
     }
 
-    /// Transcribes 16 kHz mono samples. Waits for a run in progress to finish first.
     func transcribe(_ samples: [Float]) async throws -> String {
+        try await transcribeWithTimes(samples).text
+    }
+
+    func transcribeWithTimes(_ samples: [Float]) async throws -> (text: String, tokens: [Sentences.Token]) {
         let manager = try await prepare()
         await takeTurn()
         defer { endTurn() }
         return try await run(samples, on: manager)
     }
 
-    /// A live text preview: skipped (nil) when the model is not loaded or is busy, so a preview never
-    /// delays the final text.
     func preview(_ samples: [Float]) async -> String? {
         guard let manager, !isBusy else { return nil }
         isBusy = true
         defer { endTurn() }
-        return try? await run(samples, on: manager)
+        return try? await run(samples, on: manager).text
     }
 
-    private func run(_ samples: [Float], on manager: AsrManager) async throws -> String {
+    private func run(_ samples: [Float], on manager: AsrManager) async throws -> (text: String, tokens: [Sentences.Token]) {
         let layers = await manager.decoderLayerCount
         var state = TdtDecoderState.make(decoderLayers: layers)
         let result = try await manager.transcribe(samples, decoderState: &state)
-        return result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tokens = (result.tokenTimings ?? []).map {
+            Sentences.Token(text: $0.token, start: $0.startTime, end: $0.endTime)
+        }
+        return (result.text.trimmingCharacters(in: .whitespacesAndNewlines), tokens)
     }
 
     private func takeTurn() async {
@@ -94,7 +91,6 @@ actor ParakeetModel {
         await withCheckedContinuation { waiting.append($0) }
     }
 
-    /// Hands the turn to the next caller in line, or frees it.
     private func endTurn() {
         if waiting.isEmpty {
             isBusy = false
@@ -104,7 +100,6 @@ actor ParakeetModel {
     }
 }
 
-/// The mic buffers of one dictation, shared between the reader and the live text preview.
 private final class BufferStore: @unchecked Sendable {
     private let buffers = OSAllocatedUnfairLock(uncheckedState: [AVAudioPCMBuffer]())
 
@@ -115,33 +110,26 @@ private final class BufferStore: @unchecked Sendable {
     var all: [AVAudioPCMBuffer] { buffers.withLock { $0 } }
 }
 
-/// A `SpeechEngine` that collects the whole utterance, then runs Parakeet once, like Hex.
-///
-/// For live text, Parakeet also reads the newest few seconds again every `LiveText.previewInterval`
-/// while the user talks. The text that gets typed still comes from the one pass over everything.
 struct ParakeetEngine: SpeechEngine {
     func transcribe(audio: AsyncStream<AudioChunk>, onPartial: PartialHandler?) async throws -> String {
         let store = BufferStore()
         let preview = onPartial.map { onPartial in
-            Task.detached(priority: .userInitiated) { await Self.runPreviews(of: store, onPartial: onPartial) }
+            Task.detached(priority: .userInitiated) { await Self.runPreviews(of: { store.all }, onPartial: onPartial) }
         }
         for await chunk in audio { store.append(chunk.buffer) }
         preview?.cancel()
         try Task.checkCancellation()
-        guard let joined = Self.join(store.all) else { return "" }
-        let samples = try AudioConverter().resampleBuffer(joined)
-        // Less than a tenth of a second is a tap, not speech.
+        let samples = try Self.samples(of: store.all)
         guard samples.count > 1600 else { return "" }
         return try await ParakeetModel.shared.transcribe(samples)
     }
 
-    /// Reads the newest audio again and again until cancelled, and reports what it heard.
-    private static func runPreviews(of store: BufferStore, onPartial: PartialHandler) async {
+    static func runPreviews(of buffers: @Sendable () -> [AVAudioPCMBuffer], onPartial: PartialHandler) async {
         let converter = AudioConverter()
         var lastCount = 0
         while !Task.isCancelled {
             try? await Task.sleep(for: LiveText.previewInterval)
-            let buffers = store.all
+            let buffers = buffers()
             guard buffers.count != lastCount, let format = buffers.first?.format else { continue }
             lastCount = buffers.count
             let (start, clipped) = LiveText.tailStart(
@@ -159,7 +147,11 @@ struct ParakeetEngine: SpeechEngine {
         }
     }
 
-    /// Joins buffers of one format into one buffer, so resampling has no seams.
+    static func samples(of buffers: [AVAudioPCMBuffer]) throws -> [Float] {
+        guard let joined = join(buffers) else { return [] }
+        return try AudioConverter().resampleBuffer(joined)
+    }
+
     static func join(_ buffers: [AVAudioPCMBuffer]) -> AVAudioPCMBuffer? {
         guard let first = buffers.first else { return nil }
         let format = first.format
@@ -173,7 +165,6 @@ struct ParakeetEngine: SpeechEngine {
             let target = UnsafeMutableAudioBufferListPointer(joined.mutableAudioBufferList)
             for index in 0 ..< min(source.count, target.count) {
                 guard let from = source[index].mData, let to = target[index].mData else { continue }
-                // `mBytesPerFrame` is per buffer: one channel when non-interleaved, all channels when interleaved.
                 memcpy(to.advanced(by: offset * bytesPerFrame), from, frames * bytesPerFrame)
             }
             offset += frames

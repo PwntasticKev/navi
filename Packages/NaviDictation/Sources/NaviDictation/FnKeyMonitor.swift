@@ -1,9 +1,5 @@
 import AppKit
 
-/// Watches the fn (Globe) key with NSEvent monitors and feeds `FnGesture`.
-///
-/// The global monitor sees keys while other apps are in front. It needs the Accessibility (and on
-/// recent macOS, Input Monitoring) permission. The local monitor sees keys while Navi itself is in front.
 @MainActor
 final class FnKeyMonitor {
     private var gesture = FnGesture()
@@ -21,7 +17,6 @@ final class FnKeyMonitor {
     var isRunning: Bool { globalMonitor != nil }
     var isLocked: Bool { gesture.isLocked }
 
-    /// One tap locks, the next press ends it (see `FnGesture.tapToggles`).
     var tapToggles: Bool {
         get { gesture.tapToggles }
         set { gesture.tapToggles = newValue }
@@ -66,7 +61,6 @@ final class FnKeyMonitor {
         gesture.reset()
     }
 
-    /// Stops the current gesture without an action. Used when the session ends for another reason.
     func reset() {
         tickTask?.cancel()
         tickTask = nil
@@ -86,7 +80,6 @@ final class FnKeyMonitor {
         for action in actions { onAction(action) }
     }
 
-    /// A lone tap needs a timer: when no second tap comes, `FnGesture` must end the session.
     private func scheduleTick() {
         tickTask?.cancel()
         tickTask = nil

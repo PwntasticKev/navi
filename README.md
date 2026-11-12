@@ -206,13 +206,18 @@ swift run dictation-bench --audio --speech apple,parakeet   # speak, transcribe,
 
 ### Releasing
 
+Releases are automatic. Every night, when `main` has new commits, GitHub Actions
+tests, builds a Release copy, signs it with Developer ID, gets Apple's
+notarization, signs the update for Sparkle, and publishes the next patch version.
+A failed step stops it before anything is published. Installed copies pick it up
+within a day. To release now:
+
 ```sh
-scripts/release.sh 0.2.0 "What changed."
+scripts/release.sh                       # next patch version
+scripts/release.sh 0.3.0 "What changed."
 ```
 
-It bumps the version, builds a Release copy, signs it with Developer ID, gets
-Apple's notarization, signs the update for Sparkle, and publishes a GitHub
-release. Installed copies pick it up within a day.
+Set the signing secrets once with `scripts/release-secrets.sh`.
 
 ## How it's built
 

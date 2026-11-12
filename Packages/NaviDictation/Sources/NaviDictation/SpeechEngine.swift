@@ -3,18 +3,10 @@ import Foundation
 import os
 @preconcurrency import Speech
 
-/// Turns a stream of mic audio into text. The stream ends when the user stops talking.
-///
-/// An engine reads the whole stream, then returns the final text. Audio that arrives while the engine
-/// is still starting waits in the stream, so no speech is lost at the start.
-///
-/// With `onPartial`, the engine also reports the words heard so far while the user talks (for the
-/// pill's live text). It may call it from any thread. The returned text is what gets typed.
 protocol SpeechEngine: Sendable {
     func transcribe(audio: AsyncStream<AudioChunk>, onPartial: PartialHandler?) async throws -> String
 }
 
-/// Gets the words heard so far. Called from any thread.
 typealias PartialHandler = @Sendable (String) -> Void
 
 extension SpeechEngine {
@@ -26,21 +18,16 @@ extension SpeechEngine {
 enum SpeechEngines {
     private static let logger = Logger(subsystem: "com.donovanhiland.navi", category: "SpeechEngine")
 
-    /// The best on-device engine that is ready now: Parakeet (like Hex) when its model is loaded.
-    /// Otherwise `SpeechAnalyzer` on macOS 26 and newer when its language model is installed, then
-    /// `SFSpeechRecognizer` with on-device recognition. Asking also starts the Parakeet download.
     static func best() async -> any SpeechEngine {
         if await ParakeetModel.shared.isLoaded { return ParakeetEngine() }
         warmUpParakeet()
         return await apple()
     }
 
-    /// Downloads (first time) and loads Parakeet in the background.
     static func warmUpParakeet() {
         Task.detached(priority: .utility) { try? await ParakeetModel.shared.prepare() }
     }
 
-    /// Apple's speech engines only.
     static func apple() async -> any SpeechEngine {
         if #available(macOS 26.0, *), let engine = await AnalyzerEngine.makeIfReady() {
             return engine
@@ -49,8 +36,6 @@ enum SpeechEngines {
     }
 }
 
-// MARK: SpeechAnalyzer (macOS 26+)
-
 @available(macOS 26.0, *)
 struct AnalyzerEngine: SpeechEngine {
     let locale: Locale
@@ -58,9 +43,6 @@ struct AnalyzerEngine: SpeechEngine {
     private static let logger = Logger(subsystem: "com.donovanhiland.navi", category: "AnalyzerEngine")
     private static let download = OSAllocatedUnfairLock(initialState: false)
 
-    /// Nil when the engine cannot run now: the language is not supported, or the model is not
-    /// installed yet. In the second case a download starts in the background, and the next session
-    /// can use it. This session uses the fallback engine.
     static func makeIfReady() async -> AnalyzerEngine? {
         guard SpeechTranscriber.isAvailable,
               let locale = await SpeechTranscriber.supportedLocale(equivalentTo: .current)
@@ -97,7 +79,6 @@ struct AnalyzerEngine: SpeechEngine {
     }
 
     func transcribe(audio: AsyncStream<AudioChunk>, onPartial: PartialHandler?) async throws -> String {
-        // Volatile results are the engine's guesses before a segment is final: only for live text.
         let transcriber = SpeechTranscriber(
             locale: locale,
             transcriptionOptions: [],
@@ -147,7 +128,6 @@ struct AnalyzerEngine: SpeechEngine {
     }
 }
 
-/// Converts mic buffers to the format the analyzer wants. Only a value type used by one task.
 struct AudioFormatConverter {
     private let target: AVAudioFormat?
     private var converter: AVAudioConverter?
@@ -157,7 +137,6 @@ struct AudioFormatConverter {
         self.target = target
     }
 
-    /// Returns the buffer in the target format, or the same buffer when no conversion is needed.
     mutating func convert(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
         guard let target, buffer.format != target else { return buffer }
         if converter == nil || sourceFormat != buffer.format {
@@ -186,9 +165,6 @@ struct AudioFormatConverter {
     }
 }
 
-// MARK: SFSpeechRecognizer (fallback)
-
-/// On-device `SFSpeechRecognizer`. Works on macOS 15.
 struct RecognizerEngine: SpeechEngine {
     let locale: Locale
 
@@ -217,9 +193,7 @@ struct RecognizerEngine: SpeechEngine {
     }
 }
 
-/// Wraps one recognition request. Guards the continuation so it resumes exactly once.
 private final class RecognitionJob: @unchecked Sendable {
-    /// The recognition task is thread-safe to cancel, but Speech does not mark it `Sendable`.
     private struct TaskBox: @unchecked Sendable {
         let task: SFSpeechRecognitionTask
     }

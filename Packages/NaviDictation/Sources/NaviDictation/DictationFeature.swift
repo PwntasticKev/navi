@@ -2,28 +2,6 @@ import AppKit
 import NaviCore
 import os
 
-/// Talk to type. Hold fn (Globe) to talk; release to type the text at the cursor in the front app.
-/// Double-tap fn to lock hands-free mode; one fn tap ends it. With "tap to toggle" on, one tap locks
-/// and the next press ends it. While listening, the pill can show the words heard so far.
-///
-/// While listening, a small pill with a live waveform shows at the bottom of the screen with the mouse.
-/// Speech runs on the Mac (`SpeechAnalyzer` on macOS 26 and newer, `SFSpeechRecognizer` before that).
-/// A cleanup pass removes filler words and fixes punctuation (Apple Foundation Models when ready, a
-/// rule-based pass otherwise). The text is pasted with ⌘V, so Navi needs the Accessibility permission.
-/// Each result is also added to the Inbox as a `.dictation` item.
-///
-/// How the app uses it:
-/// ```swift
-/// let dictation = DictationFeature(inbox: inbox)
-/// dictation.onProblem = { message in ... }   // optional: show the message to the user
-/// dictation.start()                          // at launch
-/// dictation.borrowFnKey()                    // optional: stop macOS from acting on fn
-/// // at quit:
-/// dictation.stop()
-/// dictation.giveBackFnKey()
-/// ```
-/// Call `DictationFeature.requestPermissions()` early (for example from a menu item) so the Microphone
-/// and Speech Recognition prompts do not appear in the middle of a first dictation.
 @MainActor
 public final class DictationFeature {
     private static let enabledKey = "dictation.enabled"
@@ -34,7 +12,6 @@ public final class DictationFeature {
 
     private let inbox: Inbox
     private let pill = DictationPill()
-    private let cleaner = TextCleaner()
     private let microphone = Microphone()
     private var monitor: FnKeyMonitor?
     private var session: Session?
@@ -42,11 +19,8 @@ public final class DictationFeature {
     private var isStarted = false
     private var levelTimer: Timer?
 
-    /// Called with a short message when dictation cannot work (missing permission, no microphone).
     public var onProblem: (@MainActor (String) -> Void)?
 
-    /// The user's choice to use dictation. Saved between launches. It starts as `true`.
-    /// Changing it while the feature runs turns the fn key listener on or off.
     public var isEnabled: Bool {
         get { UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? true }
         set {
@@ -56,10 +30,6 @@ public final class DictationFeature {
         }
     }
 
-    /// Hex's "Keep ready" mode: the microphone stays open between dictations, so a press records at
-    /// once, including the moment just before it. macOS shows the microphone indicator while it is on.
-    /// Off (the default, like Wispr Flow): the microphone is set up ahead of time and starts on each
-    /// press, with no indicator in between. Saved; starts as `false`.
     public var keepsMicrophoneReady: Bool {
         get { UserDefaults.standard.object(forKey: Self.keepReadyKey) as? Bool ?? false }
         set {
@@ -68,8 +38,6 @@ public final class DictationFeature {
         }
     }
 
-    /// One fn tap starts hands-free listening and the next press types the text, instead of a double
-    /// tap. Holding fn still works as push to talk. Saved; starts as `false`.
     public var tapToggles: Bool {
         get { UserDefaults.standard.object(forKey: Self.tapTogglesKey) as? Bool ?? false }
         set {
@@ -78,21 +46,17 @@ public final class DictationFeature {
         }
     }
 
-    /// The pill shows the words heard so far while the user talks, newest words always in view.
-    /// Only shown: the typed text comes from the full pass after the user stops. Saved; starts as `true`.
     public var showsLiveText: Bool {
         get { UserDefaults.standard.object(forKey: Self.liveTextKey) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: Self.liveTextKey) }
     }
 
-    /// False until the user turns talk to type on or off for the first time.
     public var hasChosen: Bool { UserDefaults.standard.object(forKey: Self.enabledKey) != nil }
 
     public init(inbox: Inbox) {
         self.inbox = inbox
     }
 
-    /// Starts listening for the fn key when `isEnabled` is true.
     public func start() {
         isStarted = true
         SpeechEngines.warmUpParakeet()
@@ -101,15 +65,12 @@ public final class DictationFeature {
         updateMicrophone()
     }
 
-    /// Stops listening and drops a session that is running. Does not give back the fn key.
     public func stop() {
         isStarted = false
         detachMonitor()
         microphone.close()
     }
 
-    /// Keeps the microphone in the right state between dictations: open (Keep ready), set up but off
-    /// (warm, the default), or taken down (talk to type off, or no Microphone permission).
     private func updateMicrophone() {
         let microphone = microphone
         let usable = isStarted && isEnabled && DictationPermissions.microphone == .granted
@@ -135,26 +96,30 @@ public final class DictationFeature {
         }
     }
 
-    // MARK: fn key setting
+    public func pasteLastDictation() {
+        guard session == nil, !isProcessing else { return }
+        let last = inbox.items.filter { $0.kind == .dictation }.max { $0.createdAt < $1.createdAt }
+        guard let text = last?.text else {
+            onProblem?("No dictation yet.")
+            return
+        }
+        guard TextInserter.hasAccessibility else {
+            TextInserter.requestAccessibility()
+            onProblem?("Navi needs the Accessibility permission to type your text.")
+            return
+        }
+        Task { await TextInserter.insert(text) }
+    }
 
-    /// Sets the macOS fn key action to "Do Nothing" while Navi runs. Keeps a backup of the old value.
     public func borrowFnKey() { SystemFnKey.takeOver() }
 
-    /// Puts the macOS fn key action back exactly as it was.
     public func giveBackFnKey() { SystemFnKey.giveBack() }
 
-    /// True when Navi holds the fn key setting.
     public var isFnKeyBorrowed: Bool { SystemFnKey.isTakenOver }
 
-    // MARK: Permissions
-
-    /// True when Microphone and Speech Recognition are granted.
     public static var hasPermissions: Bool { DictationPermissions.allGranted }
 
-    /// Shows the macOS prompts for Microphone and Speech Recognition. Returns true when both are granted.
     public static func requestPermissions() async -> Bool { await DictationPermissions.requestAll() }
-
-    // MARK: Monitor
 
     private func attachMonitor() {
         if monitor == nil {
@@ -179,9 +144,6 @@ public final class DictationFeature {
         }
     }
 
-    // MARK: Session
-
-    /// One run of listening: the mic, the audio stream, and the speech task.
     private struct Session {
         let id: UUID
         let transcription: Task<String, any Error>
@@ -199,13 +161,11 @@ public final class DictationFeature {
             askForPermissions()
             return
         }
-        // Speech Recognition not decided yet: ask now and skip this press. Later presses work.
         guard DictationPermissions.speechRecognition == .granted else {
             askForPermissions()
             return
         }
 
-        // The pill first, so the press feels instant. The rest catches up behind it.
         pill.show()
         startLevelTimer()
         TextCleaner.prewarm()
@@ -220,7 +180,11 @@ public final class DictationFeature {
         }
         let transcription = Task.detached { () -> String in
             let engine = await SpeechEngines.best()
-            return try await engine.transcribe(audio: stream, onPartial: onPartial)
+            if engine is ParakeetEngine {
+                return try await LiveDictation(onPartial: onPartial).transcribe(audio: stream)
+            }
+            let raw = try await engine.transcribe(audio: stream, onPartial: onPartial)
+            return await TextCleaner().clean(raw)
         }
         let app = NSWorkspace.shared.frontmostApplication
         let session = Session(
@@ -231,11 +195,9 @@ public final class DictationFeature {
 
         let microphone = microphone
         if microphone.isRunning {
-            // Keep ready: recording already runs, with the moment before the press.
             microphone.beginCapture(into: continuation, includePreRoll: true)
             return
         }
-        // Release when idle (or not ready yet): open the microphone off the main thread.
         Task.detached(priority: .userInitiated) { [weak self] in
             do {
                 try microphone.open()
@@ -249,7 +211,6 @@ public final class DictationFeature {
                 return
             }
             await MainActor.run {
-                // Released before the microphone was ready: nothing to record (like Hex).
                 guard let self, self.session?.id == session.id else {
                     continuation.finish()
                     return
@@ -260,7 +221,6 @@ public final class DictationFeature {
         }
     }
 
-    /// Shows the words heard so far, if they belong to the session still listening.
     private func showLiveText(_ text: String, for id: UUID) {
         guard session?.id == id else { return }
         pill.model.liveText = text
@@ -271,7 +231,6 @@ public final class DictationFeature {
         pill.model.isLocked = true
     }
 
-    /// The user is done talking: keep the last 200 ms, stop the capture, clean up the text, and type it.
     private func commit() {
         guard let session else { return }
         self.session = nil
@@ -286,26 +245,24 @@ public final class DictationFeature {
                 isProcessing = false
                 updateMicrophone()
             }
-            try? await Task.sleep(for: Microphone.releaseTail)
+            await microphone.waitForReleaseTail(releasedAt: released)
+            let tail = ContinuousClock.now - released
             microphone.endCapture()
-            let raw: String
+            let text: String
             do {
-                raw = try await session.transcription.value
+                text = try await session.transcription.value
             } catch {
                 Self.logger.error("Speech failed: \(error.localizedDescription)")
-                raw = ""
+                text = ""
             }
-            let heard = ContinuousClock.now
-            let text = await cleaner.clean(raw)
             pill.hide()
             Self.logger.info(
-                "Release to text: \((ContinuousClock.now - released).milliseconds) ms (speech \((heard - released).milliseconds) ms, cleanup \((ContinuousClock.now - heard).milliseconds) ms)"
+                "Release to text: \((ContinuousClock.now - released).milliseconds) ms (tail \(tail.milliseconds) ms)"
             )
             guard !text.isEmpty else { return }
             guard TextInserter.hasAccessibility else {
                 TextInserter.requestAccessibility()
                 onProblem?("Navi needs the Accessibility permission to type your text.")
-                // The text is not lost: it goes to the history.
                 inbox.add(text: text, kind: .dictation, sourceApp: session.sourceApp, sourceBundleID: session.sourceBundleID)
                 return
             }
@@ -314,7 +271,6 @@ public final class DictationFeature {
         }
     }
 
-    /// Drops the session and the audio. Nothing is typed.
     private func cancelSession() {
         guard let session else {
             if !isProcessing { pill.hide() }
@@ -355,8 +311,4 @@ extension TextInserter {
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
     }
-}
-
-private extension Duration {
-    var milliseconds: Int { Int(components.seconds * 1000 + components.attoseconds / 1_000_000_000_000_000) }
 }

@@ -4,11 +4,6 @@ import Testing
 
 @testable import NaviDictation
 
-/// Draws the dictation pill to PNG files (and, with NAVI_PILL_FRAMES, every frame of a short demo) so
-/// its look can be checked without a screen. The pill is the real `PillView`; the app window behind
-/// it is a stand-in.
-/// Off by default. Run: NAVI_SNAPSHOTS=/tmp/navi-pill swift test --filter PillSnapshot
-/// Demo frames: add NAVI_PILL_FRAMES=1, then `ffmpeg -framerate 30 -i /tmp/navi-pill/frames/%04d.png …`.
 @MainActor
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["NAVI_SNAPSHOTS"] != nil))
 struct PillSnapshotTests {
@@ -51,7 +46,6 @@ struct PillSnapshotTests {
             let model = PillModel()
             model.isLocked = true
             model.levels = Self.levels(at: time)
-            // 0.6 s tap starts; words from 1.0 s, one every 0.24 s; 7.6 s tap ends; text typed at 8.3 s.
             let heard = max(0, min(words.count, Int((time - 1.0) / 0.24)))
             model.liveText = words.prefix(heard).joined(separator: " ")
             if time >= 7.6 { model.phase = .thinking }
@@ -62,7 +56,6 @@ struct PillSnapshotTests {
         }
     }
 
-    /// A made-up voice: bars that move like speech.
     static func levels(at time: Double) -> [Float] {
         (0 ..< PillModel.barCount).map { bar in
             let t = time * 9 - Double(bar) * 0.45
@@ -82,7 +75,6 @@ struct PillSnapshotTests {
     }
 }
 
-/// A desktop with a notes window, the fn key, and the pill at the bottom center.
 struct Scene: View {
     static let size = CGSize(width: 960, height: 540)
     let model: PillModel

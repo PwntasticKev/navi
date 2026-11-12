@@ -2,7 +2,6 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// What the pill shows.
 @MainActor
 @Observable
 final class PillModel {
@@ -15,9 +14,7 @@ final class PillModel {
 
     var phase: Phase = .listening
     var isLocked = false
-    /// The words heard so far (live text). Empty until the engine reports some.
     var liveText = ""
-    /// Newest level last. Each value is 0...1.
     var levels: [Float] = Array(repeating: 0, count: PillModel.barCount)
 
     func push(level: Float) {
@@ -34,15 +31,11 @@ final class PillModel {
 }
 
 struct PillView: View {
-    /// Room for the pill to grow up by one line of words. The panel is clear and ignores the mouse,
-    /// so the empty part covers nothing.
     static let panelSize = NSSize(width: 240, height: 80)
-    /// The pill's bottom edge, from the panel's bottom. The one-line pill sits where it always has.
     static let bottomInset: CGFloat = 13
     static let spacing: CGFloat = 8
     let model: PillModel
 
-    /// Words show only while listening, once the engine has heard some.
     private var showsWords: Bool { model.phase == .listening && !model.liveText.isEmpty }
 
     var body: some View {
@@ -76,12 +69,9 @@ struct PillView: View {
         .frame(width: Self.panelSize.width, height: Self.panelSize.height, alignment: .bottom)
     }
 
-    /// The width of the bars row, so the words never make the pill wider than it was.
     private var rowWidth: CGFloat { Waveform.width }
 }
 
-/// One line of the words heard so far, as wide as the bars below it. The newest words stay in view;
-/// the oldest are cut at the start ("…").
 private struct LiveTextLine: View {
     let text: String
     let width: CGFloat
@@ -100,7 +90,6 @@ private struct Waveform: View {
     static let barWidth: CGFloat = 3
     static let barSpacing: CGFloat = 2
     static let width = CGFloat(PillModel.barCount) * barWidth + CGFloat(PillModel.barCount - 1) * barSpacing
-    /// Under the words: fewer, thinner, shorter bars (the newest ones), centered.
     static let compactBarCount = 12
     static let compactBarWidth: CGFloat = 2
     static let compactHeight: CGFloat = 8
@@ -124,8 +113,6 @@ private struct Waveform: View {
     }
 }
 
-/// A small floating pill at the bottom center of the screen with the mouse. It never takes focus and
-/// ignores the mouse, so the front app keeps typing focus.
 @MainActor
 final class DictationPill {
     let model = PillModel()
@@ -151,7 +138,6 @@ final class DictationPill {
             panel.animator().alphaValue = 0
         }, completionHandler: { [weak panel] in
             MainActor.assumeIsolated {
-                // A new session may have shown the pill again during the fade.
                 if let panel, panel.alphaValue == 0 { panel.orderOut(nil) }
             }
         })
