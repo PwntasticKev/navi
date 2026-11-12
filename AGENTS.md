@@ -137,6 +137,10 @@ video editor.
   but keep Navi's normal windows, such as the markup editor.
 - The selection overlay is a non-activating panel: it takes Esc, Space, and the
   mouse without activating Navi, so an open markup editor is not raised.
+- The area magnifier is a 92 pt rounded square, 11 pixels across, 12 pt right
+  of and below the cursor, with a hex color strip. It glides to the other side
+  at a display edge. Right-drag: up/down resizes it, left/right zooms. Both
+  are kept (`capture.magnifierSize`, `capture.magnifierPixels`).
 - The selection overlay shows at once over the live screen. The frozen screen
   images arrive about 0.2 s later and are what gets cropped; a selection that
   ends first waits for them, off screen. The overlay leaves the screen on mouse

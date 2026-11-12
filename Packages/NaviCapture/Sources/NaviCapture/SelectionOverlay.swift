@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 import Carbon.HIToolbox
 import NaviCore
 
@@ -96,7 +97,11 @@ final class SelectionSession {
 
     func setMode(_ mode: Mode) {
         self.mode = mode
-        for overlay in overlays { overlay.overlayView.resetDrag() }
+        for overlay in overlays {
+            overlay.overlayView.resetDrag()
+            overlay.overlayView.endMagnifierResize()
+            overlay.overlayView.resetMagnifierMotion()
+        }
         heldOverlay = nil
         refresh()
     }
@@ -146,6 +151,7 @@ final class SelectionSession {
 
     func hideEarly() {
         guard !keepsOverlayUntilDone else { return }
+        for overlay in overlays { overlay.overlayView.endMagnifierResize() }
         for overlay in overlays { overlay.orderOut(nil) }
         modeBar?.orderOut(nil)
         CATransaction.flush()
@@ -160,7 +166,11 @@ final class SelectionSession {
             for overlay in overlays { overlay.animationBehavior = .none }
             modeBar?.animationBehavior = .none
         }
-        for overlay in overlays { overlay.orderOut(nil) }
+        for overlay in overlays {
+            overlay.overlayView.endMagnifierResize()
+            overlay.overlayView.resetMagnifierMotion()
+            overlay.orderOut(nil)
+        }
         modeBar?.orderOut(nil)
         overlays = []
         modeBar = nil
@@ -222,6 +232,14 @@ final class OverlayView: NSView {
     private let highlight = WindowHighlight()
 
     private static let dim = NSColor.black.withAlphaComponent(0.35)
+    private static let log = Logger(subsystem: "com.donovanhiland.navi", category: "Capture")
+
+    private static var magnifierStyle = MagnifierStyle.load()
+    private static let styleLabelSeconds: Double = 1
+    private var magnifierResize: (start: MagnifierStyle, drag: CGVector, cursor: CGPoint)?
+    private var showStyleUntil: CFTimeInterval = 0
+    private var magnifierGlide = MagnifierGlide()
+    private var glideLink: CADisplayLink?
 
     static let cameraCursor: NSCursor = {
         let config = NSImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
@@ -315,6 +333,7 @@ final class OverlayView: NSView {
 
     override func mouseExited(with event: NSEvent) {
         mouse = nil
+        resetMagnifierMotion()
         updateHighlight()
         needsDisplay = true
     }
@@ -362,6 +381,7 @@ final class OverlayView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        guard magnifierResize == nil else { return }
         let point = location(of: event)
         mouse = point
         switch mode {
@@ -572,47 +592,87 @@ final class OverlayView: NSView {
     }
 
     private func drawMagnifier(at point: CGPoint, image: CGImage, in context: CGContext) {
-        let pixelCount = 15
-        let diameter: CGFloat = 120
-        let cell = diameter / CGFloat(pixelCount)
+        let style = Self.magnifierStyle
+        let panel = MagnifierRenderer.panelSize(for: style)
+        let frame = MagnifierPlacement.frame(for: point, panel: panel, side: shownMagnifierSide(for: point, panel: panel))
         let pixel = CaptureGeometry.pixel(at: point, viewSize: bounds.size, imageSize: imageSize)
-        let half = pixelCount / 2
-        let source = CGRect(x: pixel.x - half, y: pixel.y - half, width: pixelCount, height: pixelCount)
+        MagnifierRenderer.draw(image: image, pixel: pixel, pixelCount: style.pixelCount, in: frame, context: context)
 
-        var frame = CGRect(x: point.x + 24, y: point.y - 24 - diameter, width: diameter, height: diameter)
-        if frame.maxX > bounds.width { frame.origin.x = point.x - 24 - diameter }
-        if frame.minY < 30 { frame.origin.y = point.y + 24 }
-
-        context.saveGState()
-        context.addEllipse(in: frame)
-        context.clip()
-        context.setFillColor(NSColor.black.cgColor)
-        context.fill(frame)
-        if let crop = image.cropping(to: source) {
-            let dx = CGFloat(max(0, -source.minX)) * cell
-            let dy = CGFloat(max(0, -source.minY)) * cell
-            let drawRect = CGRect(
-                x: frame.minX + dx,
-                y: frame.maxY - dy - CGFloat(crop.height) * cell,
-                width: CGFloat(crop.width) * cell,
-                height: CGFloat(crop.height) * cell
-            )
-            context.interpolationQuality = .none
-            context.draw(crop, in: drawRect)
+        if magnifierResize != nil || CACurrentMediaTime() < showStyleUntil {
+            let label = "\(Int(style.size)) pt · \(style.pixelCount) px"
+            let size = Self.pillSize(label)
+            let below = frame.midY < point.y
+            let y = below ? max(frame.minY - size.height - 6, 4) : min(frame.maxY + 6, bounds.height - size.height - 4)
+            let x = min(max(frame.midX - size.width / 2, 4), bounds.width - size.width - 4)
+            drawPill(label, at: CGPoint(x: x, y: y))
         }
-        let center = CGRect(x: frame.midX - cell / 2, y: frame.midY - cell / 2, width: cell, height: cell)
-        context.setStrokeColor(NSColor.white.cgColor)
-        context.setLineWidth(1)
-        context.stroke(center)
-        context.restoreGState()
+    }
 
-        context.setStrokeColor(NSColor.white.cgColor)
-        context.setLineWidth(2)
-        context.strokeEllipse(in: frame.insetBy(dx: 1, dy: 1))
+    private func shownMagnifierSide(for point: CGPoint, panel: CGSize) -> CGVector {
+        let target = MagnifierPlacement.side(for: point, panel: panel, in: bounds)
+        let animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let side = magnifierGlide.side(toward: target, at: CACurrentMediaTime(), animates: animates)
+        if magnifierGlide.isGliding, glideLink == nil {
+            let link = displayLink(target: self, selector: #selector(glideStep))
+            link.add(to: .main, forMode: .common)
+            glideLink = link
+        }
+        return side
+    }
 
-        let label = "\(pixel.x), \(pixel.y)"
-        let size = Self.pillSize(label)
-        drawPill(label, at: CGPoint(x: frame.midX - size.width / 2, y: frame.minY - size.height - 4))
+    func resetMagnifierMotion() {
+        magnifierGlide.reset()
+        glideLink?.invalidate()
+        glideLink = nil
+    }
+
+    @objc private func glideStep() {
+        needsDisplay = true
+        guard magnifierGlide.isFinished(at: CACurrentMediaTime()) else { return }
+        glideLink?.invalidate()
+        glideLink = nil
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        guard mode == .area, NSEvent.pressedMouseButtons & 1 == 0 else { return super.rightMouseDown(with: event) }
+        let status = CGAssociateMouseAndMouseCursorPosition(0)
+        guard status == .success else {
+            Self.log.error("Could not hold the cursor for a magnifier resize: \(status.rawValue)")
+            return
+        }
+        magnifierResize = (Self.magnifierStyle, .zero, NSEvent.mouseLocation)
+        needsDisplay = true
+    }
+
+    override func rightMouseDragged(with event: NSEvent) {
+        guard let resize = magnifierResize else { return super.rightMouseDragged(with: event) }
+        let drag = resize.start.clampedDrag(CGVector(dx: resize.drag.dx + event.deltaX, dy: resize.drag.dy - event.deltaY))
+        magnifierResize = (resize.start, drag, resize.cursor)
+        Self.magnifierStyle = resize.start.resized(by: drag)
+        needsDisplay = true
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        guard magnifierResize != nil else { return super.rightMouseUp(with: event) }
+        endMagnifierResize()
+    }
+
+    func endMagnifierResize() {
+        guard let resize = magnifierResize else { return }
+        magnifierResize = nil
+        if NSEvent.mouseLocation != resize.cursor {
+            let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+            CGWarpMouseCursorPosition(CGPoint(x: resize.cursor.x, y: primaryHeight - resize.cursor.y))
+        }
+        let status = CGAssociateMouseAndMouseCursorPosition(1)
+        if status != .success { Self.log.error("Could not give the cursor back after a magnifier resize: \(status.rawValue)") }
+        Self.magnifierStyle.save()
+        showStyleUntil = CACurrentMediaTime() + Self.styleLabelSeconds
+        needsDisplay = true
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(Self.styleLabelSeconds + 0.05))
+            self?.needsDisplay = true
+        }
     }
 
     private static let pillAttributes: [NSAttributedString.Key: Any] = [
