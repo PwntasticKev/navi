@@ -48,12 +48,14 @@ struct AnnotateCanvas: View {
                     case let .active(location):
                         let point = pixel(location, fit: fit)
                         model.pointerMoved(to: point)
-                        model.cursor(at: point).set()
+                        model.pointer(at: point).cursor.set()
                     case .ended:
                         model.pointerMoved(to: nil)
                         NSCursor.arrow.set()
                     }
                 }
+                .onChange(of: model.tool) { model.hoverPointer?.cursor.set() }
+                .onChange(of: model.selection) { model.hoverPointer?.cursor.set() }
                 .onDrop(of: [.fileURL, .image], isTargeted: nil) { providers in
                     loadDroppedImage(providers)
                     return true
@@ -90,9 +92,13 @@ struct AnnotateCanvas: View {
                 } else {
                     model.pointerDragged(from: start, to: point)
                 }
+                model.dragPointer(at: point).cursor.set()
             }
             .onEnded { value in
-                model.pointerUp(from: pixel(value.startLocation, fit: fit), to: pixel(value.location, fit: fit))
+                let end = pixel(value.location, fit: fit)
+                model.pointerUp(from: pixel(value.startLocation, fit: fit), to: end)
+                model.pointerMoved(to: end)
+                model.pointer(at: end).cursor.set()
             }
     }
 
