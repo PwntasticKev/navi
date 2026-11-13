@@ -10,6 +10,7 @@ struct AnnotateCanvas: View {
 
     @Bindable var model: AnnotateModel
     let layout: Layout
+    var setsHoverCursor = true
     @FocusState private var isTyping: Bool
 
     var body: some View {
@@ -41,10 +42,10 @@ struct AnnotateCanvas: View {
                     case let .active(location):
                         let point = pixel(location, fit: fit)
                         model.pointerMoved(to: point)
-                        model.pointer(at: point).cursor.set()
+                        if setsHoverCursor { model.pointer(at: point).cursor.set() }
                     case .ended:
                         model.pointerMoved(to: nil)
-                        NSCursor.arrow.set()
+                        if setsHoverCursor { NSCursor.arrow.set() }
                     }
                 }
                 .onChange(of: model.tool) { model.hoverPointer?.cursor.set() }

@@ -55,6 +55,7 @@ final class InPlaceAnnotator {
         colorPanelLevel = NSColorPanel.shared.level
         NSColorPanel.shared.level = InPlaceWindow.overlayLevel + 1
         if !NSApp.isActive { registerFallbackKeys() }
+        BackgroundCursor.setEnabled(true)
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
         activeObserver = NotificationCenter.default.addObserver(
@@ -79,6 +80,7 @@ final class InPlaceAnnotator {
         if let activeObserver { NotificationCenter.default.removeObserver(activeObserver) }
         activeObserver = nil
         releaseFallbackKeys()
+        BackgroundCursor.setEnabled(false)
         if let colorPanelLevel { NSColorPanel.shared.level = colorPanelLevel }
         colorPanelLevel = nil
         if action == nil { window?.animationBehavior = .none }
@@ -178,6 +180,7 @@ struct InPlaceAnnotateView: View {
     let onCancel: () -> Void
     var revealOverride: CGFloat?
     @State private var toolbarSize = CGSize(width: 900, height: 44)
+    @State private var tips = TooltipCenter()
     @State private var reveal: CGFloat = 0
     @State private var pointer: CGPoint?
     @State private var isDraggingFrame = false
@@ -202,7 +205,7 @@ struct InPlaceAnnotateView: View {
                         .frame(width: proxy.size.width, height: proxy.size.height)
                 }
                 dim(around: hole, in: proxy.size)
-                AnnotateCanvas(model: model, layout: .actualSize)
+                AnnotateCanvas(model: model, layout: .actualSize, setsHoverCursor: false)
                     .frame(width: hole.width, height: hole.height)
                     .offset(x: hole.minX, y: hole.minY)
                 frameAdjuster(hole: hole, screen: proxy.size)
@@ -214,7 +217,12 @@ struct InPlaceAnnotateView: View {
             .onContinuousHover(coordinateSpace: .named(Self.space)) { phase in
                 if case let .active(point) = phase { pointer = point } else { pointer = nil }
                 updateReveal(hole: hole)
+                if let point = pointer {
+                    let toolbarFrame = CGRect(origin: toolbarOrigin, size: toolbarSize)
+                    currentPointer(at: point, hole: hole, toolbar: toolbarFrame).cursor.set()
+                }
             }
+            .tooltipLayer(tips)
         }
         .ignoresSafeArea()
     }
@@ -236,6 +244,27 @@ struct InPlaceAnnotateView: View {
             }
         )
         .frame(width: screen.width, height: screen.height, alignment: .topLeading)
+    }
+
+    private func currentPointer(at point: CGPoint, hole: CGRect, toolbar: CGRect) -> AnnotateModel.Pointer {
+        Self.pointer(
+            at: point, hole: hole, toolbar: toolbar,
+            canAdjust: backdrop != nil && model.placement?.canReframe == true,
+            showsMoveTab: (revealOverride ?? reveal) > 0,
+            inside: { model.pointer(at: CGPoint(x: ($0.x - hole.minX) * model.scale, y: ($0.y - hole.minY) * model.scale)) }
+        )
+    }
+
+    static func pointer(
+        at point: CGPoint, hole: CGRect, toolbar: CGRect, canAdjust: Bool, showsMoveTab: Bool,
+        inside: (CGPoint) -> AnnotateModel.Pointer
+    ) -> AnnotateModel.Pointer {
+        if toolbar.contains(point) { return .arrow }
+        if canAdjust, showsMoveTab, FrameAdjuster.moveTabZone(of: hole).contains(point) { return .openHand }
+        if canAdjust, let handle = FrameAdjuster.resizeHandle(of: hole, at: point) {
+            return .resize(FrameAdjuster.resizePosition(for: handle))
+        }
+        return hole.contains(point) ? inside(point) : .arrow
     }
 
     private func updateReveal(hole: CGRect) {
@@ -264,7 +293,6 @@ struct InPlaceAnnotateView: View {
             .frame(width: size.width, height: size.height)
             .contentShape(Rectangle())
         .onTapGesture {}
-        .onHover { inside in if inside { NSCursor.arrow.set() } }
     }
 
     private var toolbar: some View {

@@ -191,7 +191,14 @@ video editor.
   resize, the tab to move; the shot is cut again from the frozen screen and the marks stay on
   their pixels (`ScreenPlacement`). One undo puts a whole drag back. A crop
   keeps the kept pixels in place; rotate, flip, or resize lock the frame. The
-  dim outside is 0.42. Return or Copy copies the
+  dim outside is 0.42. One hover handler on the whole screen picks the pointer
+  (`InPlaceAnnotateView.pointer`): arrow over the toolbar, open hand over the
+  move tab, resize arrows on the frame edge, the tool's pointer inside the shot;
+  the canvas does not set its own there. The toolbar uses the custom tooltips
+  (`tooltipLayer`), since AppKit tool tips do not show while Navi is in the
+  background, and `BackgroundCursor` stays on while the editor is up. The `⇧⌘5`
+  bar shows its own tips (`HoverTip`, above the overlay) and the arrow
+  pointer. Return or Copy copies the
   marked-up shot, adds it to the history with its marks, and shows "Copied";
   no corner card. Save (`⌘S`) writes it to the save folder and shows "Saved".
   Stash only keeps it in the history and shows "Stashed". Both add it to the

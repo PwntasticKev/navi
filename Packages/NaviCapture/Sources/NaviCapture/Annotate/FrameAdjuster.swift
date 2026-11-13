@@ -50,10 +50,6 @@ struct FrameAdjuster: View {
         let inner = frame.insetBy(dx: Self.grabInside, dy: Self.grabInside)
         return Color.clear
             .contentShape(GrabRing(outer: outer, inner: inner), eoFill: true)
-            .onContinuousHover(coordinateSpace: .named(InPlaceAnnotateView.space)) { phase in
-                guard dragStart == nil, case let .active(point) = phase, let handle = handle(at: point) else { return }
-                Self.cursor(for: handle).set()
-            }
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .named(InPlaceAnnotateView.space))
                     .onChanged { value in
@@ -83,7 +79,6 @@ struct FrameAdjuster: View {
         .fixedSize()
         .contentShape(Capsule())
         .opacity(reveal)
-        .onHover { inside in if inside { NSCursor.openHand.set() } }
         .gesture(
             DragGesture(minimumDistance: 1, coordinateSpace: .named(InPlaceAnnotateView.space))
                 .onChanged { value in
@@ -113,6 +108,13 @@ struct FrameAdjuster: View {
 
     private var screenBounds: CGRect { CGRect(origin: .zero, size: screenSize) }
 
+    static func resizeHandle(of frame: CGRect, at point: CGPoint) -> CaptureGeometry.FrameHandle? {
+        let outer = frame.insetBy(dx: -grab, dy: -grab)
+        let inner = frame.insetBy(dx: grabInside, dy: grabInside)
+        guard outer.contains(point), !inner.contains(point) else { return nil }
+        return CaptureGeometry.frameHandle(of: frame, near: point, tolerance: grab)
+    }
+
     private func handle(at point: CGPoint) -> CaptureGeometry.FrameHandle? {
         CaptureGeometry.frameHandle(of: frame, near: point, tolerance: Self.grab)
     }
@@ -130,8 +132,8 @@ struct FrameAdjuster: View {
         onDragging(false)
     }
 
-    static func cursor(for handle: CaptureGeometry.FrameHandle) -> NSCursor {
-        let position: NSCursor.FrameResizePosition = switch handle {
+    static func resizePosition(for handle: CaptureGeometry.FrameHandle) -> NSCursor.FrameResizePosition {
+        switch handle {
         case .top: .top
         case .bottom: .bottom
         case .left: .left
@@ -141,7 +143,6 @@ struct FrameAdjuster: View {
         case .bottomLeft: .bottomLeft
         case .bottomRight: .bottomRight
         }
-        return .frameResize(position: position, directions: .all)
     }
 }
 

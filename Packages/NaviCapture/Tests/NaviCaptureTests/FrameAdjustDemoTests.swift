@@ -102,13 +102,13 @@ struct FrameAdjustDemoTests {
 
     private static func cursorImage(for drag: Drag, at point: CGPoint, hole: CGRect) -> NSCursor {
         switch drag {
-        case let .handle(handle): return FrameAdjuster.cursor(for: handle)
+        case let .handle(handle): return .frameResize(position: FrameAdjuster.resizePosition(for: handle), directions: .all)
         case .grip: return .closedHand
         case .none:
             let tab = FrameAdjuster.moveTabZone(of: hole)
             if abs(point.x - tab.midX) < 40, abs(point.y - tab.midY) < tab.height / 2 { return .openHand }
             if let handle = CaptureGeometry.frameHandle(of: hole, near: point, tolerance: FrameAdjuster.grab) {
-                return FrameAdjuster.cursor(for: handle)
+                return .frameResize(position: FrameAdjuster.resizePosition(for: handle), directions: .all)
             }
             return hole.contains(point) ? .crosshair : .arrow
         }

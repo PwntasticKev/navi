@@ -148,6 +148,7 @@ final class SelectionSession {
     func hideEarly() {
         guard !keepsOverlayUntilDone else { return }
         for overlay in overlays { overlay.orderOut(nil) }
+        HoverTip.hide()
         modeBar?.orderOut(nil)
         CATransaction.flush()
     }
@@ -162,6 +163,7 @@ final class SelectionSession {
             modeBar?.animationBehavior = .none
         }
         for overlay in overlays { overlay.orderOut(nil) }
+        HoverTip.hide()
         modeBar?.orderOut(nil)
         overlays = []
         NSCursor.arrow.set()
