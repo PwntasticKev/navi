@@ -21,10 +21,21 @@ final class LiveDictation: Sendable {
 
     private let state = OSAllocatedUnfairLock(initialState: State())
     private let cleaner = SentenceCleaner()
+    private let onPartial: PartialHandler?
+
+    init(onPartial: PartialHandler? = nil) {
+        self.onPartial = onPartial
+    }
 
     func transcribe(audio: AsyncStream<AudioChunk>) async throws -> String {
         let passes = Task.detached(priority: .userInitiated) { [self] in await runPasses() }
         defer { passes.cancel() }
+        let preview = onPartial.map { onPartial in
+            Task.detached(priority: .userInitiated) { [state] in
+                await ParakeetEngine.runPreviews(of: { state.withLockUnchecked { $0.buffers } }, onPartial: onPartial)
+            }
+        }
+        defer { preview?.cancel() }
         for await chunk in audio {
             let buffer = chunk.buffer
             let loud = Microphone.loudness(of: buffer) >= Microphone.soundLevel
@@ -35,6 +46,7 @@ final class LiveDictation: Sendable {
             }
         }
         let released = ContinuousClock.now
+        preview?.cancel()
         passes.cancel()
         await passes.value
         try Task.checkCancellation()

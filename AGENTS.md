@@ -58,8 +58,13 @@ Desktop Icons). Not checked yet: the `⌥⇧⌘N` menu and a second display.
   size and scaled up, and the preview renders at 1600 px at most).
 
 **Talk to type and step 5 are built, not checked by Donovan yet:**
-- `Packages/NaviDictation`: hold fn to talk, double-tap fn to lock, pill with
-  a waveform, on-device speech (Parakeet TDT v3 through FluidAudio, from Hex;
+- `Packages/NaviDictation`: hold fn to talk, double-tap fn to lock ("Tap fn
+  to Start and Stop" in Settings, off by default: one tap locks, the next press
+  types), pill with a waveform and live text ("Show Words While Talking", on by
+  default: one line of words above shorter bars, no wider than the bars, the
+  newest words stay in view and the oldest are cut with "…"; Parakeet reads the newest 10 s again every 0.6 s for it,
+  Apple speech uses its partial results; only shown, the typed text still comes
+  from the sentence passes and the final pass), on-device speech (Parakeet TDT v3 through FluidAudio, from Hex;
   `SpeechAnalyzer` or `SFSpeechRecognizer` until the Parakeet model is loaded.
   The model, about 0.5 GB, downloads on first start to
   `~/Library/Application Support/FluidAudio/Models`), cleanup with Foundation Models or rules, paste at the
@@ -159,6 +164,10 @@ video editor.
   Because Navi stays in the background, the overlay turns on the window
   server's `SetsCursorInBackground` (`BackgroundCursor`) while it is up, or
   macOS would keep the normal pointer instead of the crosshair.
+- The area magnifier is a 76 pt rounded square, 9 pixels across, 20 pt right
+  of and below the cursor, with a hex color strip. It glides to the other side
+  at a display edge. Right-drag: up/down resizes it, left/right zooms. Both
+  are kept (`capture.magnifierSize`, `capture.magnifierPixels`).
 - The screen freeze starts before the selection overlay is built. When Navi
   has no normal window open and Hide Desktop Icons is off, it captures each
   display with a filter that leaves out the whole Navi app (cached displays

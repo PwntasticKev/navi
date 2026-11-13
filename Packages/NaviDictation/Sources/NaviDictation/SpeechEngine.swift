@@ -4,7 +4,15 @@ import os
 @preconcurrency import Speech
 
 protocol SpeechEngine: Sendable {
-    func transcribe(audio: AsyncStream<AudioChunk>) async throws -> String
+    func transcribe(audio: AsyncStream<AudioChunk>, onPartial: PartialHandler?) async throws -> String
+}
+
+typealias PartialHandler = @Sendable (String) -> Void
+
+extension SpeechEngine {
+    func transcribe(audio: AsyncStream<AudioChunk>) async throws -> String {
+        try await transcribe(audio: audio, onPartial: nil)
+    }
 }
 
 enum SpeechEngines {
@@ -70,8 +78,13 @@ struct AnalyzerEngine: SpeechEngine {
         }
     }
 
-    func transcribe(audio: AsyncStream<AudioChunk>) async throws -> String {
-        let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
+    func transcribe(audio: AsyncStream<AudioChunk>, onPartial: PartialHandler?) async throws -> String {
+        let transcriber = SpeechTranscriber(
+            locale: locale,
+            transcriptionOptions: [],
+            reportingOptions: onPartial == nil ? [] : [.volatileResults],
+            attributeOptions: []
+        )
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         let targetFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
 
@@ -79,7 +92,13 @@ struct AnalyzerEngine: SpeechEngine {
         let results = Task { () -> String in
             var segments: [String] = []
             for try await result in transcriber.results {
-                segments.append(String(result.text.characters))
+                let text = String(result.text.characters)
+                if result.isFinal {
+                    segments.append(text)
+                    onPartial?(LiveText.combine(finished: segments, volatile: ""))
+                } else {
+                    onPartial?(LiveText.combine(finished: segments, volatile: text))
+                }
             }
             return segments.joined(separator: " ")
         }
@@ -149,17 +168,17 @@ struct AudioFormatConverter {
 struct RecognizerEngine: SpeechEngine {
     let locale: Locale
 
-    func transcribe(audio: AsyncStream<AudioChunk>) async throws -> String {
+    func transcribe(audio: AsyncStream<AudioChunk>, onPartial: PartialHandler?) async throws -> String {
         guard let recognizer = SFSpeechRecognizer(locale: locale),
               recognizer.isAvailable, recognizer.supportsOnDeviceRecognition
         else { throw DictationError.speechUnavailable }
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.requiresOnDeviceRecognition = true
-        request.shouldReportPartialResults = false
+        request.shouldReportPartialResults = onPartial != nil
         request.addsPunctuation = true
 
-        let job = RecognitionJob(request: request)
+        let job = RecognitionJob(request: request, onPartial: onPartial)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 job.begin(recognizer: recognizer, continuation: continuation)
@@ -187,10 +206,12 @@ private final class RecognitionJob: @unchecked Sendable {
     }
 
     private let request: SFSpeechAudioBufferRecognitionRequest
+    private let onPartial: PartialHandler?
     private let state = OSAllocatedUnfairLock(uncheckedState: State())
 
-    init(request: SFSpeechAudioBufferRecognitionRequest) {
+    init(request: SFSpeechAudioBufferRecognitionRequest, onPartial: PartialHandler?) {
         self.request = request
+        self.onPartial = onPartial
     }
 
     func begin(recognizer: SFSpeechRecognizer, continuation: CheckedContinuation<String, any Error>) {
@@ -207,6 +228,8 @@ private final class RecognitionJob: @unchecked Sendable {
                 finish(.success(result.bestTranscription.formattedString))
             } else if let error {
                 finish(.failure(error))
+            } else if let result {
+                onPartial?(result.bestTranscription.formattedString)
             }
         }
         let box = TaskBox(task: task)

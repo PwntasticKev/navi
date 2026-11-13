@@ -209,6 +209,18 @@ final class SettingsPanel: NSObject, NSWindowDelegate {
                 get: { dictation.keepsMicrophoneReady }, set: { dictation.keepsMicrophoneReady = $0 },
                 isEnabled: isOn
             ),
+            .init(
+                id: "tapToggles", title: "Tap fn to Start and Stop",
+                detail: "One tap locks; the next press types",
+                get: { dictation.tapToggles }, set: { dictation.tapToggles = $0 },
+                isEnabled: isOn
+            ),
+            .init(
+                id: "showsLiveText", title: "Show Words While Talking",
+                detail: "Live words in the pill",
+                get: { dictation.showsLiveText }, set: { dictation.showsLiveText = $0 },
+                isEnabled: isOn
+            ),
         ]
     }
 
