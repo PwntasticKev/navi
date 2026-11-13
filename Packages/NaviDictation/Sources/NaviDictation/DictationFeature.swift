@@ -14,7 +14,6 @@ public final class DictationFeature {
     private var monitor: FnKeyMonitor?
     private var session: Session?
     private var isProcessing = false
-    /// The commit that is turning speech into text. Esc cancels it before anything is typed.
     private var processing: Task<Void, Never>?
     private var isStarted = false
     private var levelTimer: Timer?
@@ -236,7 +235,6 @@ public final class DictationFeature {
                 Self.logger.error("Speech failed: \(error.localizedDescription)")
                 text = ""
             }
-            // Esc while thinking: drop the text. Nothing is typed, copied, or kept.
             guard !Task.isCancelled else { return }
             pill.hide()
             Self.logger.info(
@@ -254,7 +252,6 @@ public final class DictationFeature {
         }
     }
 
-    /// Esc after the user stopped talking: stops the text being made, so nothing is typed.
     private func cancelProcessing() {
         guard let processing else { return }
         processing.cancel()

@@ -10,7 +10,6 @@ final class FnKeyMonitor {
     private var localKeyMonitor: Any?
     private var tickTask: Task<Void, Never>?
     private let onAction: @MainActor (FnGesture.Action) -> Void
-    /// Called on Esc when no gesture is running, so the feature can stop text still being processed.
     private let onIdleEscape: @MainActor () -> Void
 
     init(

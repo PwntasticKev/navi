@@ -99,7 +99,6 @@ public struct FnGesture: Equatable, Sendable {
         }
     }
 
-    /// Call when Esc goes down. Ends any listening without typing. A held fn is ignored until released.
     public mutating func escapePressed() -> [Action] {
         switch phase {
         case .idle, .ignoringUntilUp:
