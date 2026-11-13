@@ -66,6 +66,7 @@ final class SelectionSession {
     static let revealLimit: TimeInterval = 0.1
 
     func begin(revealAfterFreeze: Bool = false) {
+        BackgroundCursor.setEnabled(true)
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             switch Int(event.keyCode) {
@@ -164,6 +165,8 @@ final class SelectionSession {
             for overlay in overlays { overlay.animationBehavior = .none }
             modeBar?.animationBehavior = .none
         }
+        NSCursor.arrow.set()
+        BackgroundCursor.setEnabled(false)
         let completion = completion
         self.completion = nil
         let closing = overlays
@@ -541,9 +544,12 @@ final class OverlayView: NSView {
         resetDrag()
         if captured == nil { session?.hideEarly() }
         let finish = { [weak self] in
-            guard let self, let captured else { return }
+            guard let self else { return }
             let pixels = CaptureGeometry.pixelRect(forSelection: selection, viewSize: bounds.size, imageSize: imageSize)
-            guard let cropped = captured.image.cropping(to: pixels) else { return }
+            guard let captured, let cropped = captured.image.cropping(to: pixels) else {
+                session?.finish(.cancelled)
+                return
+            }
             let area = CaptureGeometry.viewRect(forPixels: pixels, viewSize: bounds.size, imageSize: imageSize)
             let topLeft = CGRect(x: area.minX, y: bounds.height - area.maxY, width: area.width, height: area.height)
             session?.finish(.area(CapturedImage(image: cropped, scale: captured.scale), screen, rect: topLeft))

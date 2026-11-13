@@ -161,6 +161,9 @@ video editor.
   but keep Navi's normal windows, such as the markup editor.
 - The selection overlay is a non-activating panel: it takes Esc, Space, and the
   mouse without activating Navi, so an open markup editor is not raised.
+  Because Navi stays in the background, the overlay turns on the window
+  server's `SetsCursorInBackground` (`BackgroundCursor`) while it is up, or
+  macOS would keep the normal pointer instead of the crosshair.
 - The screen freeze starts before the selection overlay is built. When Navi
   has no normal window open and Hide Desktop Icons is off, it captures each
   display with a filter that leaves out the whole Navi app (cached displays
