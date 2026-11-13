@@ -1,11 +1,14 @@
 import AppKit
 import NaviCore
+import Observation
 import os
 
 @MainActor
 public final class DictationFeature {
     private static let enabledKey = "dictation.enabled"
     private static let keepReadyKey = "dictation.keepMicrophoneReady"
+    private static let learnWordsKey = "dictation.learnWords"
+    private static let learnDelay: Duration = .seconds(5)
     nonisolated private static let logger = Logger(subsystem: "com.donovanhiland.navi", category: "Dictation")
 
     private let inbox: Inbox
@@ -16,6 +19,9 @@ public final class DictationFeature {
     private var isProcessing = false
     private var isStarted = false
     private var levelTimer: Timer?
+    private var learnTask: Task<Void, Never>?
+
+    public let vocabulary = VocabularyStore()
 
     public var onProblem: (@MainActor (String) -> Void)?
 
@@ -36,6 +42,14 @@ public final class DictationFeature {
         }
     }
 
+    public var learnsWords: Bool {
+        get { UserDefaults.standard.object(forKey: Self.learnWordsKey) as? Bool ?? true }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Self.learnWordsKey)
+            if newValue { learnSoon() }
+        }
+    }
+
     public var hasChosen: Bool { UserDefaults.standard.object(forKey: Self.enabledKey) != nil }
 
     public init(inbox: Inbox) {
@@ -46,12 +60,37 @@ public final class DictationFeature {
         isStarted = true
         SpeechEngines.warmUpParakeet()
         TextCleaner.prewarm()
+        vocabulary.applyToEngine()
+        watchHistory()
         if isEnabled { attachMonitor() }
         updateMicrophone()
     }
 
+    private func watchHistory() {
+        guard isStarted else { return }
+        withObservationTracking {
+            _ = inbox.items
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.watchHistory() }
+        }
+        learnSoon()
+    }
+
+    private func learnSoon() {
+        guard isStarted, learnsWords else { return }
+        learnTask?.cancel()
+        learnTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.learnDelay)
+            guard !Task.isCancelled, let self, self.learnsWords else { return }
+            let texts = self.inbox.items.filter { $0.kind == .text }.compactMap(\.text)
+            self.vocabulary.learn(from: texts)
+        }
+    }
+
     public func stop() {
         isStarted = false
+        learnTask?.cancel()
+        learnTask = nil
         detachMonitor()
         microphone.close()
     }
