@@ -164,6 +164,10 @@ video editor.
   Because Navi stays in the background, the overlay turns on the window
   server's `SetsCursorInBackground` (`BackgroundCursor`) while it is up, or
   macOS would keep the normal pointer instead of the crosshair.
+- The area magnifier is a 76 pt rounded square, 9 pixels across, 20 pt right
+  of and below the cursor, with a hex color strip. It glides to the other side
+  at a display edge. Right-drag: up/down resizes it, left/right zooms. Both
+  are kept (`capture.magnifierSize`, `capture.magnifierPixels`).
 - The screen freeze starts before the selection overlay is built. When Navi
   has no normal window open and Hide Desktop Icons is off, it captures each
   display with a filter that leaves out the whole Navi app (cached displays
