@@ -2,6 +2,7 @@ import DictationEval
 import Foundation
 import NaviDictation
 
+
 let packageRoot = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 let casesURL = packageRoot.appending(path: "Bench/cases.json")
 
@@ -24,6 +25,11 @@ var arguments = Array(CommandLine.arguments.dropFirst())
         arguments.removeSubrange(index ... index + 1)
     }
     return found
+}
+
+if flag("--latency") {
+    try await Latency.run(verbose: flag("--failures"))
+    exit(0)
 }
 
 let useAudio = flag("--audio")

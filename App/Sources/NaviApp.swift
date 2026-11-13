@@ -35,7 +35,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuHotKey: HotKey?
     private var extraHotKeys: [HotKey] = []
     private var screenshotHotKeys: [HotKey] = []
+    private var pasteLastHotKey: HotKey?
     private lazy var naviMenu = NaviMenu(app: self)
+    private lazy var settingsPanel = SettingsPanel(app: self)
     private lazy var shortcutRecorder = HistoryShortcutRecorder(
         apply: { [weak self] in self?.setHistoryShortcut($0) ?? .refused },
         onClose: { [weak self] in self?.resumeHotKeys() }
@@ -62,6 +64,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case nil: askAboutScreenshotKeys()
         }
         if !dictation.hasChosen { askAboutTalkToType() }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            self?.settingsPanel.prepare()
+        }
         if !ClipboardFeature.hasAccessibility {
             ClipboardFeature.requestAccessibility()
         }
@@ -97,6 +103,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { _ = await DictationFeature.requestPermissions() }
         } else {
             dictation.giveBackFnKey()
+        }
+        updatePasteLastHotKey()
+    }
+
+    private func updatePasteLastHotKey() {
+        pasteLastHotKey?.unregister()
+        pasteLastHotKey = nil
+        guard dictation.isEnabled else { return }
+        pasteLastHotKey = register("Paste Last Dictation", NaviHotKeys.pasteLastDictation) { [weak self] in
+            self?.dictation.pasteLastDictation()
         }
     }
 
@@ -138,12 +154,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if capture.settings.useNaviScreenshotKeys == true {
             screenshotHotKeys = makeScreenshotHotKeys()
         }
+        updatePasteLastHotKey()
     }
 
     private func unregisterHotKeys() {
         historyHotKey?.unregister()
         menuHotKey?.unregister()
         for hotKey in extraHotKeys + screenshotHotKeys { hotKey.unregister() }
+        pasteLastHotKey?.unregister()
+        pasteLastHotKey = nil
         historyHotKey = nil
         menuHotKey = nil
         extraHotKeys = []
@@ -161,6 +180,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             registerHotKeys()
             logger.info("Navi shortcuts resumed, History on \(self.historyShortcut.display, privacy: .public)")
         }
+    }
+
+    func showSettings(at anchor: CGPoint) {
+        settingsPanel.show(at: anchor)
     }
 
     func changeHistoryShortcut() {

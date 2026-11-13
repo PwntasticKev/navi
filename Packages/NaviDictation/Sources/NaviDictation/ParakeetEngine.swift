@@ -54,11 +54,18 @@ actor ParakeetModel {
     }
 
     func transcribe(_ samples: [Float]) async throws -> String {
+        try await transcribeWithTimes(samples).text
+    }
+
+    func transcribeWithTimes(_ samples: [Float]) async throws -> (text: String, tokens: [Sentences.Token]) {
         let manager = try await prepare()
         let layers = await manager.decoderLayerCount
         var state = TdtDecoderState.make(decoderLayers: layers)
         let result = try await manager.transcribe(samples, decoderState: &state)
-        return result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tokens = (result.tokenTimings ?? []).map {
+            Sentences.Token(text: $0.token, start: $0.startTime, end: $0.endTime)
+        }
+        return (result.text.trimmingCharacters(in: .whitespacesAndNewlines), tokens)
     }
 }
 
@@ -67,10 +74,14 @@ struct ParakeetEngine: SpeechEngine {
         var buffers: [AVAudioPCMBuffer] = []
         for await chunk in audio { buffers.append(chunk.buffer) }
         try Task.checkCancellation()
-        guard let joined = Self.join(buffers) else { return "" }
-        let samples = try AudioConverter().resampleBuffer(joined)
+        let samples = try Self.samples(of: buffers)
         guard samples.count > 1600 else { return "" }
         return try await ParakeetModel.shared.transcribe(samples)
+    }
+
+    static func samples(of buffers: [AVAudioPCMBuffer]) throws -> [Float] {
+        guard let joined = join(buffers) else { return [] }
+        return try AudioConverter().resampleBuffer(joined)
     }
 
     static func join(_ buffers: [AVAudioPCMBuffer]) -> AVAudioPCMBuffer? {
