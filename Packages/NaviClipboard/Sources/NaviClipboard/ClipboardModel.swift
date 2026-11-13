@@ -5,7 +5,9 @@ import SwiftUI
 
 enum Metrics {
     static let width: CGFloat = 450
-    static let headerHeight: CGFloat = 44
+    static let searchHeight: CGFloat = 44
+    static let scopeHeight: CGFloat = 26
+    static let headerHeight: CGFloat = searchHeight + scopeHeight
     static let textRowHeight: CGFloat = 24
     static let imageRowHeight: CGFloat = 50
     static let listPadding: CGFloat = 5
@@ -19,11 +21,36 @@ enum Metrics {
     }
 }
 
+public enum HistoryScope: CaseIterable, Sendable {
+    case all, text, images, dictation
+
+    var title: String {
+        switch self {
+        case .all: "All"
+        case .text: "Text"
+        case .images: "Images"
+        case .dictation: "Dictation"
+        }
+    }
+
+    func includes(_ kind: CaptureKind) -> Bool {
+        switch self {
+        case .all: true
+        case .text: kind == .text
+        case .images: kind == .image || kind == .screenshot || kind == .recording
+        case .dictation: kind == .dictation
+        }
+    }
+}
+
 @MainActor
 @Observable
 public final class ClipboardModel {
     let inbox: Inbox
     public var query = "" {
+        didSet { select(0) }
+    }
+    public var scope = HistoryScope.all {
         didSet { select(0) }
     }
     var selection = 0 {
@@ -40,7 +67,9 @@ public final class ClipboardModel {
     @ObservationIgnored private let images = NSCache<NSString, NSImage>()
     @ObservationIgnored private var decoding: [NSString: Task<CGImage?, Never>] = [:]
     @ObservationIgnored private var appIcons: [String: NSImage] = [:]
-    @ObservationIgnored private var lastSearch: (query: String, items: Int, keys: Int, results: [CaptureItem])?
+    @ObservationIgnored private var lastSearch: (
+        query: String, scope: HistoryScope, items: Int, keys: Int, results: [CaptureItem], height: CGFloat
+    )?
 
     public init(inbox: Inbox) {
         self.inbox = inbox
@@ -48,15 +77,19 @@ public final class ClipboardModel {
 
     public var results: [CaptureItem] {
         let query = self.query
+        let scope = self.scope
         _ = inbox.items
         let items = inbox.itemsVersion, keys = inbox.searchKeysVersion
-        if let lastSearch, lastSearch.query == query, lastSearch.items == items, lastSearch.keys == keys {
+        if let lastSearch, lastSearch.query == query, lastSearch.scope == scope,
+           lastSearch.items == items, lastSearch.keys == keys {
             return lastSearch.results
         }
         let interval = HistorySignpost.signposter.beginInterval("Search")
-        let results = inbox.search(query)
+        var results = inbox.search(query)
+        if scope != .all { results.removeAll { !scope.includes($0.kind) } }
         HistorySignpost.signposter.endInterval("Search", interval)
-        lastSearch = (query, items, keys, results)
+        let height = listHeight(for: results)
+        lastSearch = (query, scope, items, keys, results, height)
         return results
     }
 
@@ -68,19 +101,30 @@ public final class ClipboardModel {
     }
 
     func listHeight(for results: [CaptureItem]) -> CGFloat {
-        let rows = results.isEmpty
-            ? Metrics.textRowHeight
-            : results.reduce(0) { $0 + Metrics.rowHeight(for: $1) }
+        let rows = results.isEmpty ? Metrics.textRowHeight : Self.height(of: results[...])
         return min(rows + Metrics.listPadding * 2, maxListHeight)
     }
 
+    var listHeight: CGFloat {
+        _ = results
+        return lastSearch?.height ?? Metrics.textRowHeight + Metrics.listPadding * 2
+    }
+
     var contentHeight: CGFloat {
-        Metrics.headerHeight + listHeight(for: results) + Metrics.footerHeight
+        Metrics.headerHeight + listHeight + Metrics.footerHeight
+    }
+
+    private static func height(of rows: ArraySlice<CaptureItem>) -> CGFloat {
+        rows.withUnsafeBufferPointer { buffer in
+            var imageRows = 0
+            for index in buffer.indices where buffer[index].fileName != nil { imageRows += 1 }
+            return CGFloat(imageRows) * Metrics.imageRowHeight + CGFloat(buffer.count - imageRows) * Metrics.textRowHeight
+        }
     }
 
     private func rowSpan(at index: Int, in results: [CaptureItem]) -> ClosedRange<CGFloat>? {
         guard results.indices.contains(index) else { return nil }
-        let top = results[..<index].reduce(Metrics.listPadding) { $0 + Metrics.rowHeight(for: $1) }
+        let top = Metrics.listPadding + Self.height(of: results[..<index])
         return top...(top + Metrics.rowHeight(for: results[index]))
     }
 
@@ -98,9 +142,16 @@ public final class ClipboardModel {
 
     func reset() {
         query = ""
+        scope = .all
         select(0)
         opens += 1
         lastHoverLocation = NSEvent.mouseLocation
+    }
+
+    func cycleScope(by offset: Int) {
+        let all = HistoryScope.allCases
+        let index = all.firstIndex(of: scope) ?? 0
+        scope = all[(index + offset + all.count) % all.count]
     }
 
     func move(by offset: Int) {
@@ -154,10 +205,13 @@ public final class ClipboardModel {
         } else {
             guard let file = inbox.fileURL(for: item) else { return nil }
             let preview = inbox.previewURL(for: item.id)
+            let row = inbox.rowThumbnailURL(for: item.id)
             let maxPixelSize = 400
             task = Task.detached(priority: .userInitiated) {
-                Self.downsample(preview, maxPixelSize: maxPixelSize) ?? Self.downsample(file, maxPixelSize: maxPixelSize)
+                Self.decodeCache(row) ?? Self.downsample(preview, maxPixelSize: maxPixelSize)
+                    ?? Self.downsample(file, maxPixelSize: maxPixelSize)
             }
+            inbox.ensureImageCaches(for: item)
             decoding[key] = task
         }
         let interval = HistorySignpost.signposter.beginInterval("RowImage")
@@ -187,9 +241,12 @@ public final class ClipboardModel {
         if let cached = images.object(forKey: key) { return cached }
         guard let file = inbox.fileURL(for: item) else { return nil }
         let preview = inbox.previewURL(for: item.id)
+        let card = inbox.cardImageURL(for: item.id)
         let maxPixelSize = Int(Metrics.previewMaxWidth * 2)
         let decoded = await Task.detached(priority: .userInitiated) {
-            Self.decodeForCard(preview, maxPixelSize: maxPixelSize) ?? Self.decodeForCard(file, maxPixelSize: maxPixelSize)
+            Self.decodeForCard(card, original: file, maxPixelSize: maxPixelSize)
+                ?? Self.decodeForCard(preview, original: preview, maxPixelSize: maxPixelSize)
+                ?? Self.decodeForCard(file, original: file, maxPixelSize: maxPixelSize)
         }.value
         guard let decoded else { return nil }
         let image = NSImage(cgImage: decoded.image, size: decoded.pointSize)
@@ -220,16 +277,27 @@ public final class ClipboardModel {
         return options as CFDictionary
     }
 
+    private nonisolated static func decodeCache(_ url: URL) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+    }
+
     private nonisolated static func downsample(_ url: URL, maxPixelSize: Int) -> CGImage? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
         return CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions(maxPixelSize: maxPixelSize))
     }
 
-    private nonisolated static func decodeForCard(_ url: URL, maxPixelSize: Int) -> (image: CGImage, pointSize: CGSize)? {
+    private nonisolated static func decodeForCard(
+        _ url: URL, original: URL, maxPixelSize: Int
+    ) -> (image: CGImage, pointSize: CGSize)? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let thumb = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions(maxPixelSize: maxPixelSize))
+              let thumb = url == original
+                ? CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions(maxPixelSize: maxPixelSize))
+                : CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
         else { return nil }
-        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let originalSource = url == original ? source : CGImageSourceCreateWithURL(original as CFURL, nil)
+        guard let originalSource else { return nil }
+        let properties = CGImageSourceCopyPropertiesAtIndex(originalSource, 0, nil) as? [CFString: Any]
         let dpi = (properties?[kCGImagePropertyDPIWidth] as? NSNumber)?.doubleValue ?? 72
         let dpiValue = dpi > 0 ? dpi : 72
         let thumbLong = Double(max(thumb.width, thumb.height))

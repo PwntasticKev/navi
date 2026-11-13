@@ -48,7 +48,10 @@ struct PreRollBuffer<Chunk> {
 
 final class Microphone: @unchecked Sendable {
     static let preRoll: Double = 0.45
-    static let releaseTail: Duration = .milliseconds(200)
+    static let quietToEnd: Duration = .milliseconds(200)
+    static let minimumTail: Duration = .milliseconds(40)
+    static let maximumTail: Duration = .milliseconds(600)
+    static let soundLevel: Float = 0.45
 
     private struct State: @unchecked Sendable {
         var running = false
@@ -57,6 +60,7 @@ final class Microphone: @unchecked Sendable {
         var sink: AsyncStream<AudioChunk>.Continuation?
         var preRoll = PreRollBuffer<AVAudioPCMBuffer>(capacity: 0)
         var level: Float = 0
+        var lastSound: ContinuousClock.Instant?
     }
 
     private let setup = NSRecursiveLock()
@@ -166,6 +170,22 @@ final class Microphone: @unchecked Sendable {
         for buffer in kept { sink.yield(AudioChunk(buffer: buffer)) }
     }
 
+    func waitForReleaseTail(releasedAt released: ContinuousClock.Instant) async {
+        while true {
+            let now = ContinuousClock.now
+            let lastSound = state.withLock { $0.lastSound }
+            if Self.tailIsDone(sinceRelease: now - released, sinceSound: lastSound.map { now - $0 }) { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    static func tailIsDone(sinceRelease: Duration, sinceSound: Duration?) -> Bool {
+        if sinceRelease < minimumTail { return false }
+        if sinceRelease >= maximumTail { return true }
+        guard let sinceSound else { return true }
+        return sinceSound >= quietToEnd
+    }
+
     func endCapture() {
         let sink = state.withLock { state -> AsyncStream<AudioChunk>.Continuation? in
             defer { state.sink = nil }
@@ -256,8 +276,10 @@ final class Microphone: @unchecked Sendable {
 
     private func receive(_ buffer: AVAudioPCMBuffer) {
         let level = Self.loudness(of: buffer)
+        let now = ContinuousClock.now
         let sink = state.withLockUnchecked { state -> AsyncStream<AudioChunk>.Continuation? in
             state.level = level
+            if level >= Self.soundLevel { state.lastSound = now }
             if state.sink == nil { state.preRoll.append(buffer, frames: Int(buffer.frameLength)) }
             return state.sink
         }
