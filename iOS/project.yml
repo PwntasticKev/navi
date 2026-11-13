@@ -1,0 +1,98 @@
+name: NaviPhone
+options:
+  bundleIdPrefix: com.donovanhiland
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    TARGETED_DEVICE_FAMILY: "1"
+    CODE_SIGN_STYLE: Automatic
+    NAVI_IOS_BUNDLE_ID: com.donovanhiland.navi.ios
+    NAVI_APP_GROUP: group.com.donovanhiland.navi.ios
+packages:
+  NaviPad:
+    path: ../Packages/NaviPad
+  FluidAudio:
+    url: https://github.com/FluidInference/FluidAudio.git
+    exactVersion: 0.18.2
+targets:
+  NaviPhone:
+    type: application
+    platform: iOS
+    sources:
+      - path: App/Sources
+      - path: Shared
+      - path: ../Packages/NaviDictation/Sources/NaviDictation/TextCleanup.swift
+        group: Dictation
+      - path: ../Packages/NaviDictation/Sources/NaviDictation/TextCleaner.swift
+        group: Dictation
+      - path: ../Packages/NaviDictation/Sources/NaviDictation/Sentences.swift
+        group: Dictation
+      - path: ../Packages/NaviDictation/Sources/NaviDictation/SpeechEngine.swift
+        group: Dictation
+      - path: ../Packages/NaviDictation/Sources/NaviDictation/ParakeetEngine.swift
+        group: Dictation
+    dependencies:
+      - package: NaviPad
+      - package: FluidAudio
+      - target: NaviKeyboard
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Navi
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NaviAppGroup: $(NAVI_APP_GROUP)
+        UILaunchScreen: {}
+        UIBackgroundModes: [audio]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIUserInterfaceStyle: Dark
+        NSMicrophoneUsageDescription: Navi listens while you talk to type, then turns your words into text on this iPhone.
+        NSSpeechRecognitionUsageDescription: Navi turns your speech into text on this iPhone.
+        CFBundleURLTypes:
+          - CFBundleURLName: $(NAVI_IOS_BUNDLE_ID)
+            CFBundleURLSchemes: [navi-ios]
+    entitlements:
+      path: App/NaviPhone.entitlements
+      properties:
+        com.apple.security.application-groups: [$(NAVI_APP_GROUP)]
+    settings:
+      base:
+        PRODUCT_NAME: Navi
+        PRODUCT_BUNDLE_IDENTIFIER: $(NAVI_IOS_BUNDLE_ID)
+  NaviKeyboard:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Keyboard/Sources
+      - path: Shared
+    dependencies:
+      - package: NaviPad
+    info:
+      path: Keyboard/Info.plist
+      properties:
+        CFBundleDisplayName: Navi
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NaviAppGroup: $(NAVI_APP_GROUP)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
+          NSExtensionAttributes:
+            IsASCIICapable: false
+            PrefersRightToLeft: false
+            PrimaryLanguage: en-US
+            RequestsOpenAccess: true
+    entitlements:
+      path: Keyboard/NaviKeyboard.entitlements
+      properties:
+        com.apple.security.application-groups: [$(NAVI_APP_GROUP)]
+    settings:
+      base:
+        PRODUCT_NAME: NaviKeyboard
+        PRODUCT_BUNDLE_IDENTIFIER: $(NAVI_IOS_BUNDLE_ID).keyboard
+        APPLICATION_EXTENSION_API_ONLY: YES

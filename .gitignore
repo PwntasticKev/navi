@@ -9,3 +9,5 @@ DerivedData/
 xcuserdata/
 .DS_Store
 dist/
+iOS/App/Info.plist
+iOS/Keyboard/Info.plist

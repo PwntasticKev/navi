@@ -102,8 +102,21 @@ video editor.
 
 ## Decisions
 
-- **One app, one menu bar icon.** This gives one set of macOS permissions
-  (screen, mic, accessibility) and one shared history.
+- **One app, one menu bar icon** on the Mac. This gives one set of macOS
+  permissions (screen, mic, accessibility) and one shared history.
+- **iPhone: talk to type only** (`iOS/`, not built for TestFlight yet). A
+  Navi keyboard that is only a mic pad, reached with the globe key, so Apple's
+  keyboard (and its predictions) stays the main keyboard. A keyboard cannot use
+  the mic, so the Navi app records in the background (`UIBackgroundModes:
+  audio`) while its mic session is warm (15 minutes after the last use). The
+  keyboard and the app talk through an App Group file (`pad-state.json`) and
+  Darwin notifications (`Packages/NaviPad`). The pad opens already listening,
+  shows live words, types the cleaned text with `insertText`, then goes back
+  to the previous keyboard. When the session is cold, the pad opens the app
+  (`navi-ios://start`, responder-chain `openURL`); the user swipes back. The
+  app reuses the Mac's speech and cleanup files (`TextCleanup`, `TextCleaner`,
+  `Sentences`, `SpeechEngine`, `ParakeetEngine`) straight from
+  `Packages/NaviDictation`, so keep those free of AppKit.
 - **One Swift package per feature** under `Packages/`. Features talk only
   through `NaviCore`. A feature package never imports another feature package.
 - **Stack:** Swift 6, SwiftUI, and AppKit. Not Electron. Not Tauri.
@@ -298,6 +311,8 @@ Xnapper's backgrounds, and macshot's auto-redact.
 | `docs/capture-plan.html` | Prototype, feature map, and plan |
 | `docs/upstream-hex.md` | Hex as the upstream for talk to type: feature map, sync steps |
 | `Packages/NaviDictation/Bench` | Dictation benchmark cases and saved results |
+| `Packages/NaviPad` | iPhone keyboard and app link: pad state, App Group store, Darwin signals, cleanup diff |
+| `iOS/project.yml` | XcodeGen spec for the iPhone app (`NaviPhone`) and the keyboard (`NaviKeyboard`) |
 | `docs/performance.md` | Speed goal and numbers for every area; capture, recording, and history benchmarks |
 | `Packages/NaviClipboard/Bench` | Saved `history-bench` results |
 
@@ -324,6 +339,9 @@ cd Packages/NaviRecording && swift test # recording math, GIF, audio mixdown
 cd Packages/NaviDictation && swift test # cleanup rules, fn gestures, fn setting, scoring
 cd Packages/NaviDictation && swift run dictation-bench [--audio [--speech apple,parakeet]] [--failures] [--save]
 cd Packages/NaviDictation && swift run -c release dictation-bench --latency [--failures]  # release-to-text time for 3 s to 60 s dictations, live and not
+cd Packages/NaviPad && swift test       # iPhone pad state, store, cleanup diff
+cd iOS && xcodegen generate && xcodebuild -project NaviPhone.xcodeproj -scheme NaviPhone \
+  -destination 'generic/platform=iOS Simulator' -derivedDataPath build.noindex build  # iPhone app; a device build needs DEVELOPMENT_TEAM
 cd Packages/NaviClipboard && swift run -c release history-bench [--sizes 200,1000,5000] [--corpus ascii|mixed] [--save]  # History list benchmark
 NAVI_HISTORY_SNAPSHOTS=/tmp/navi-history swift test --filter HistorySnapshot  # in NaviClipboard: draws the ⇧⌘V panel to PNGs (each scope, and the order after a dictation)
 swift scripts/comments.swift [--fix]  # fails on any comment in Swift code; --fix removes them
