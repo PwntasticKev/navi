@@ -20,6 +20,7 @@ public struct FnGesture: Equatable, Sendable {
 
     public var holdThreshold: TimeInterval = 0.30
     public var doubleTapWindow: TimeInterval = 0.40
+    public var tapToggles = false
 
     private(set) var phase: Phase = .idle
 
@@ -55,6 +56,9 @@ public struct FnGesture: Equatable, Sendable {
             if time - since >= holdThreshold {
                 phase = .idle
                 actions.append(.commit)
+            } else if tapToggles {
+                phase = .locked
+                actions.append(.lock)
             } else {
                 phase = .tapped(at: time)
             }
