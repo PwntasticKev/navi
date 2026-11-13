@@ -14,6 +14,8 @@ public final class DictationFeature {
     private var monitor: FnKeyMonitor?
     private var session: Session?
     private var isProcessing = false
+    /// The commit that is turning speech into text. Esc cancels it before anything is typed.
+    private var processing: Task<Void, Never>?
     private var isStarted = false
     private var levelTimer: Timer?
 
@@ -108,7 +110,10 @@ public final class DictationFeature {
 
     private func attachMonitor() {
         if monitor == nil {
-            monitor = FnKeyMonitor { [weak self] action in self?.handle(action) }
+            monitor = FnKeyMonitor(
+                onAction: { [weak self] action in self?.handle(action) },
+                onIdleEscape: { [weak self] in self?.cancelProcessing() }
+            )
         }
         monitor?.start()
     }
@@ -210,9 +215,10 @@ public final class DictationFeature {
         isProcessing = true
         let released = ContinuousClock.now
 
-        Task {
+        processing = Task {
             defer {
                 isProcessing = false
+                processing = nil
                 updateMicrophone()
             }
             await microphone.waitForReleaseTail(releasedAt: released)
@@ -220,11 +226,18 @@ public final class DictationFeature {
             microphone.endCapture()
             let text: String
             do {
-                text = try await session.transcription.value
+                let transcription = session.transcription
+                text = try await withTaskCancellationHandler {
+                    try await transcription.value
+                } onCancel: {
+                    transcription.cancel()
+                }
             } catch {
                 Self.logger.error("Speech failed: \(error.localizedDescription)")
                 text = ""
             }
+            // Esc while thinking: drop the text. Nothing is typed, copied, or kept.
+            guard !Task.isCancelled else { return }
             pill.hide()
             Self.logger.info(
                 "Release to text: \((ContinuousClock.now - released).milliseconds) ms (tail \(tail.milliseconds) ms)"
@@ -241,9 +254,17 @@ public final class DictationFeature {
         }
     }
 
+    /// Esc after the user stopped talking: stops the text being made, so nothing is typed.
+    private func cancelProcessing() {
+        guard let processing else { return }
+        processing.cancel()
+        pill.hide()
+        Self.logger.info("Dictation cancelled with Esc while processing")
+    }
+
     private func cancelSession() {
         guard let session else {
-            if !isProcessing { pill.hide() }
+            if isProcessing { cancelProcessing() } else { pill.hide() }
             return
         }
         self.session = nil

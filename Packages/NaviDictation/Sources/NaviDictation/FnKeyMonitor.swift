@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 
 @MainActor
 final class FnKeyMonitor {
@@ -9,9 +10,15 @@ final class FnKeyMonitor {
     private var localKeyMonitor: Any?
     private var tickTask: Task<Void, Never>?
     private let onAction: @MainActor (FnGesture.Action) -> Void
+    /// Called on Esc when no gesture is running, so the feature can stop text still being processed.
+    private let onIdleEscape: @MainActor () -> Void
 
-    init(onAction: @escaping @MainActor (FnGesture.Action) -> Void) {
+    init(
+        onAction: @escaping @MainActor (FnGesture.Action) -> Void,
+        onIdleEscape: @escaping @MainActor () -> Void
+    ) {
         self.onAction = onAction
+        self.onIdleEscape = onIdleEscape
     }
 
     var isRunning: Bool { globalMonitor != nil }
@@ -33,11 +40,13 @@ final class FnKeyMonitor {
             MainActor.assumeIsolated { self?.flagsChanged(fnDown: fnDown, othersHeld: othersHeld, at: time) }
             return event
         }
-        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] _ in
-            MainActor.assumeIsolated { self?.keyPressed() }
+        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let keyCode = event.keyCode
+            MainActor.assumeIsolated { self?.keyPressed(keyCode: keyCode) }
         }
         localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            MainActor.assumeIsolated { self?.keyPressed() }
+            let keyCode = event.keyCode
+            MainActor.assumeIsolated { self?.keyPressed(keyCode: keyCode) }
             return event
         }
     }
@@ -62,9 +71,23 @@ final class FnKeyMonitor {
         gesture.reset()
     }
 
-    private func keyPressed() {
+    private func keyPressed(keyCode: UInt16) {
+        if keyCode == UInt16(kVK_Escape) {
+            escapePressed()
+            return
+        }
         let actions = gesture.keyPressed()
         guard !actions.isEmpty else { return }
+        scheduleTick()
+        for action in actions { onAction(action) }
+    }
+
+    private func escapePressed() {
+        let actions = gesture.escapePressed()
+        guard !actions.isEmpty else {
+            onIdleEscape()
+            return
+        }
         scheduleTick()
         for action in actions { onAction(action) }
     }

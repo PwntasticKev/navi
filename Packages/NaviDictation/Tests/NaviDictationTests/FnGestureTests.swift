@@ -95,4 +95,45 @@ struct FnGestureTests {
         #expect(gesture.keyPressed().isEmpty)
         #expect(gesture.isLocked)
     }
+
+    @Test("Esc while locked cancels, and the next press starts fresh")
+    func escapeWhileLocked() {
+        var gesture = FnGesture()
+        _ = gesture.handle(fnDown: true, othersHeld: false, at: 1.00)
+        _ = gesture.handle(fnDown: false, othersHeld: false, at: 1.10)
+        _ = gesture.handle(fnDown: true, othersHeld: false, at: 1.30)
+        _ = gesture.handle(fnDown: false, othersHeld: false, at: 1.40)
+        #expect(gesture.isLocked)
+        #expect(gesture.escapePressed() == [.cancel])
+        #expect(!gesture.isActive)
+        #expect(gesture.handle(fnDown: true, othersHeld: false, at: 5.0) == [.begin])
+    }
+
+    @Test("Esc while fn is down to end the lock cancels, and the release does not commit")
+    func escapeWhileEndingLock() {
+        var gesture = FnGesture()
+        _ = gesture.handle(fnDown: true, othersHeld: false, at: 1.00)
+        _ = gesture.handle(fnDown: false, othersHeld: false, at: 1.10)
+        _ = gesture.handle(fnDown: true, othersHeld: false, at: 1.30)
+        _ = gesture.handle(fnDown: false, othersHeld: false, at: 1.40)
+        _ = gesture.handle(fnDown: true, othersHeld: false, at: 5.0)
+        #expect(gesture.escapePressed() == [.cancel])
+        #expect(gesture.handle(fnDown: false, othersHeld: false, at: 5.1).isEmpty)
+        #expect(!gesture.isActive)
+    }
+
+    @Test("Esc while holding fn cancels, and the release does not commit")
+    func escapeWhileHolding() {
+        var gesture = FnGesture()
+        _ = gesture.handle(fnDown: true, othersHeld: false, at: 1.0)
+        #expect(gesture.escapePressed() == [.cancel])
+        #expect(gesture.handle(fnDown: false, othersHeld: false, at: 2.0).isEmpty)
+        #expect(!gesture.isActive)
+    }
+
+    @Test("Esc when idle does nothing")
+    func escapeIdle() {
+        var gesture = FnGesture()
+        #expect(gesture.escapePressed().isEmpty)
+    }
 }
