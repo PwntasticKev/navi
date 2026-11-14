@@ -170,4 +170,17 @@ import Testing
         #expect(CaptureGeometry.toolbarOrigin(below: left, toolbar: Self.bar, in: Self.screen, gap: 8, margin: 10).x == 10)
         #expect(CaptureGeometry.toolbarOrigin(below: right, toolbar: Self.bar, in: Self.screen, gap: 8, margin: 10).x == 590)
     }
+
+    @Test func tipGoesAboveTheMouse() {
+        let frame = CaptureGeometry.tipFrame(size: CGSize(width: 80, height: 20), mouse: CGPoint(x: 500, y: 100), gap: 14, in: CGRect(x: 0, y: 0, width: 1000, height: 800))
+        #expect(frame == CGRect(x: 460, y: 114, width: 80, height: 20))
+    }
+
+    @Test func tipStaysOnScreen() {
+        let screen = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let size = CGSize(width: 80, height: 20)
+        #expect(CaptureGeometry.tipFrame(size: size, mouse: CGPoint(x: 5, y: 100), gap: 14, in: screen).minX == 0)
+        #expect(CaptureGeometry.tipFrame(size: size, mouse: CGPoint(x: 995, y: 100), gap: 14, in: screen).maxX == 1000)
+        #expect(CaptureGeometry.tipFrame(size: size, mouse: CGPoint(x: 500, y: 790), gap: 14, in: screen).minY == 756)
+    }
 }

@@ -16,13 +16,43 @@ final class ModeBarPanel: NSPanel {
         hasShadow = true
         isReleasedWhenClosed = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        contentView = FirstMouseHostingView(rootView: ModeBarView(model: model))
+        contentView = ModeBarHostingView(rootView: ModeBarView(model: model))
     }
 
     override var canBecomeKey: Bool { false }
 
     @MainActor
     func refresh() { model.version += 1 }
+}
+
+private final class ModeBarHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas where area.owner === self && area.userInfo?["modeBarCursor"] != nil {
+            removeTrackingArea(area)
+        }
+        addTrackingArea(NSTrackingArea(
+            rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self, userInfo: ["modeBarCursor": true]
+        ))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        NSCursor.arrow.set()
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        NSCursor.arrow.set()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        HoverTip.hide()
+    }
 }
 
 @MainActor
@@ -41,22 +71,22 @@ private struct ModeBarView: View {
         let _ = model.version
         let session = model.session
         HStack(spacing: 4) {
-            item("Area", "rectangle.dashed", on: session?.purpose == .screenshot && session?.mode == .area) {
+            item("Area", "rectangle.dashed", tip: "Capture an area (⇧⌘4)", on: session?.purpose == .screenshot && session?.mode == .area) {
                 session?.purpose = .screenshot
                 session?.setMode(.area)
             }
-            item("Window", "macwindow", on: session?.purpose == .screenshot && session?.mode == .window) {
+            item("Window", "macwindow", tip: "Capture a window (Space)", on: session?.purpose == .screenshot && session?.mode == .window) {
                 session?.purpose = .screenshot
                 session?.setMode(.window)
             }
-            item("Fullscreen", "rectangle.inset.filled", on: false) {
+            item("Fullscreen", "rectangle.inset.filled", tip: "Capture the whole screen (⇧⌘3)", on: false) {
                 if let screen = NSScreen.underMouse { session?.finish(.fullscreen(screen)) }
             }
             Divider().frame(height: 26)
-            item("Scrolling", "arrow.up.and.down.text.horizontal", on: session?.purpose == .scroll) { session?.purpose = .scroll }
-            item("Text", "text.viewfinder", on: session?.purpose == .text) { session?.purpose = .text }
+            item("Scrolling", "arrow.up.and.down.text.horizontal", tip: "Capture a long page as it scrolls (⌥⇧⌘4)", on: session?.purpose == .scroll) { session?.purpose = .scroll }
+            item("Text", "text.viewfinder", tip: "Copy the text in an area (⌥⇧⌘T)", on: session?.purpose == .text) { session?.purpose = .text }
             if session?.canRecord == true {
-                item("Record", "record.circle", on: session?.purpose == .record) { session?.purpose = .record }
+                item("Record", "record.circle", tip: "Record the screen (⌥⇧⌘5)", on: session?.purpose == .record) { session?.purpose = .record }
             }
             Divider().frame(height: 26)
             if session?.hasHeldSelection == true, let purpose = session?.purpose, purpose != .record {
@@ -74,11 +104,12 @@ private struct ModeBarView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
+            .hoverTip("Self-timer")
             Button { session?.finish(.cancelled) } label: {
                 Image(systemName: "xmark.circle.fill").font(.system(size: 16)).foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .help("Cancel (Esc)")
+            .hoverTip("Cancel (Esc)")
         }
         .padding(.horizontal, 12)
         .frame(height: 52)
@@ -103,10 +134,10 @@ private struct ModeBarView: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .help("\(title) (Return)")
+        .hoverTip("\(title) (Return)")
     }
 
-    private func item(_ title: String, _ symbol: String, on: Bool, action: @escaping () -> Void) -> some View {
+    private func item(_ title: String, _ symbol: String, tip: String, on: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 2) {
                 Image(systemName: symbol).font(.system(size: 15))
@@ -118,5 +149,6 @@ private struct ModeBarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .hoverTip(tip)
     }
 }

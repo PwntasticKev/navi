@@ -158,6 +158,7 @@ final class SelectionSession {
         guard !keepsOverlayUntilDone else { return }
         for overlay in overlays { overlay.overlayView.endMagnifierResize() }
         for overlay in overlays { overlay.orderOut(nil) }
+        HoverTip.hide()
         modeBar?.orderOut(nil)
         CATransaction.flush()
     }
@@ -171,6 +172,7 @@ final class SelectionSession {
             for overlay in overlays { overlay.animationBehavior = .none }
             modeBar?.animationBehavior = .none
         }
+        HoverTip.hide()
         for overlay in overlays {
             overlay.overlayView.endMagnifierResize()
             overlay.overlayView.resetMagnifierMotion()

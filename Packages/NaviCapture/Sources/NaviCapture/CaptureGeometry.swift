@@ -182,4 +182,11 @@ public enum CaptureGeometry {
         let inside = min(area.maxY, screen.height - margin) - gap - toolbar.height
         return CGPoint(x: x, y: max(margin, inside))
     }
+
+    public static func tipFrame(size: CGSize, mouse: CGPoint, gap: CGFloat, in screen: CGRect) -> CGRect {
+        let x = min(max(mouse.x - size.width / 2, screen.minX), max(screen.minX, screen.maxX - size.width))
+        let above = mouse.y + gap
+        let y = above + size.height <= screen.maxY ? above : max(screen.minY, mouse.y - gap - size.height)
+        return CGRect(x: x, y: y, width: size.width, height: size.height)
+    }
 }
