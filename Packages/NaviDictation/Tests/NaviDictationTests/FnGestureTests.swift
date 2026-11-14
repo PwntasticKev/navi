@@ -95,4 +95,39 @@ struct FnGestureTests {
         #expect(gesture.keyPressed().isEmpty)
         #expect(gesture.isLocked)
     }
+
+    @Test("tap to toggle: one tap locks at once, the next press commits on release")
+    func tapToggle() {
+        var gesture = FnGesture()
+        gesture.tapToggles = true
+        #expect(gesture.handle(fnDown: true, othersHeld: false, at: 1.00) == [.begin])
+        #expect(gesture.handle(fnDown: false, othersHeld: false, at: 1.10) == [.lock])
+        #expect(gesture.isLocked)
+        #expect(gesture.tickDeadline == nil)
+        #expect(gesture.tick(at: 10.0) == nil)
+        #expect(gesture.isActive)
+        #expect(gesture.keyPressed().isEmpty)
+        #expect(gesture.handle(fnDown: true, othersHeld: false, at: 12.0).isEmpty)
+        #expect(gesture.handle(fnDown: false, othersHeld: false, at: 12.1) == [.commit])
+        #expect(!gesture.isActive)
+    }
+
+    @Test("tap to toggle: holding still works as push to talk")
+    func tapToggleHold() {
+        var gesture = FnGesture()
+        gesture.tapToggles = true
+        #expect(gesture.handle(fnDown: true, othersHeld: false, at: 1.0) == [.begin])
+        #expect(gesture.handle(fnDown: false, othersHeld: false, at: 2.0) == [.commit])
+        #expect(!gesture.isActive)
+    }
+
+    @Test("tap to toggle: fn with another key still cancels")
+    func tapToggleChord() {
+        var gesture = FnGesture()
+        gesture.tapToggles = true
+        _ = gesture.handle(fnDown: true, othersHeld: false, at: 1.0)
+        #expect(gesture.keyPressed() == [.cancel])
+        #expect(gesture.handle(fnDown: false, othersHeld: false, at: 1.1).isEmpty)
+        #expect(!gesture.isActive)
+    }
 }

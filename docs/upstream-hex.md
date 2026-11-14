@@ -29,10 +29,10 @@ features into `Packages/NaviDictation` and checks them with the benchmark.
 | Order of steps | Spoken formatting, spoken symbols, fillers, replacements, mode corrections, OpenCode rewrite, transforms | Fillers (rules), then Apple's model |
 | Vocabulary | Vocabulary biasing for Parakeet (`docs/features/vocabulary.md`, Labs) | One list, rescored with FluidAudio's CTC vocabulary boosting (64 terms). Navi also learns words from the clipboard history (`WordLearner.swift`); Hex has no learning |
 | Spoken punctuation, formatting | Labs, Output group (`docs/features/labs.md`) | None |
-| Live text | Words beside the HUD while you talk (Labs) | None |
+| Live text | Words beside the HUD while you talk (Labs) | "Show Words While Talking" (on by default): one line in the pill, newest words in view. Parakeet previews the newest 10 s every 0.6 s, alongside the sentence passes; Apple speech reports partial results (`LiveText.swift`) |
 | Speech while talking | Streaming finish: a live Parakeet stream (Unified English, 1.04 s chunks) fed every 160 ms; the release only finalizes it, with the whole clip as the fallback (`docs/features/dictation.md`, Streaming Finish) | Sentence passes with Parakeet v3 (`LiveDictation.swift`): about once a second and when the user goes quiet, the audio after the last finished sentence is transcribed; finished sentences are cut at a pause in the audio and cleaned at once. The release transcribes only the rest, or reuses the newest pass |
 | Microphone | Keep ready (stream open, 450 ms pre-roll) or Release when idle; 200 ms release tail (`docs/features/dictation.md`, Warm And Cold Capture) | "Keep Microphone Ready" (off by default; then the mic is set up but off until the press, like Wispr Flow), 450 ms pre-roll, tail until 200 ms of quiet (40 to 600 ms); input-only AUHAL unit, like Hex's cpal stream, so output audio is never touched (`AudioCapture.swift`) |
-| Shortcut | Option by default. Hold, toggle, double-tap; Fn/Globe, keys, mouse buttons | Hold fn, double-tap fn to lock |
+| Shortcut | Option by default. Hold, toggle, double-tap; Fn/Globe, keys, mouse buttons | Hold fn, double-tap fn to lock, or "Tap fn to Start and Stop" (toggle) |
 | Meetings | Call detection, recording, transcripts, chapters, notes | None |
 | CLI | `hex dictation start/stop/toggle`, `hex paste-last`, transcript CLI | None |
 

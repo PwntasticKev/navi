@@ -22,6 +22,8 @@ actor ParakeetModel {
     private static let logger = Logger(subsystem: "com.donovanhiland.navi", category: "Parakeet")
     private var manager: AsrManager?
     private var loading: Task<AsrManager, any Error>?
+    private var isBusy = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
 
     nonisolated static var isDownloaded: Bool {
         AsrModels.modelsExist(at: AsrModels.defaultCacheDirectory(for: version), version: version)
@@ -59,6 +61,19 @@ actor ParakeetModel {
 
     func transcribeWithTimes(_ samples: [Float]) async throws -> (text: String, tokens: [Sentences.Token]) {
         let manager = try await prepare()
+        await takeTurn()
+        defer { endTurn() }
+        return try await run(samples, on: manager)
+    }
+
+    func preview(_ samples: [Float]) async -> String? {
+        guard let manager, !isBusy else { return nil }
+        isBusy = true
+        defer { endTurn() }
+        return try? await run(samples, on: manager, boosts: false).text
+    }
+
+    private func run(_ samples: [Float], on manager: AsrManager, boosts: Bool = true) async throws -> (text: String, tokens: [Sentences.Token]) {
         let layers = await manager.decoderLayerCount
         var state = TdtDecoderState.make(decoderLayers: layers)
         let result = try await manager.transcribe(samples, decoderState: &state)
@@ -66,7 +81,7 @@ actor ParakeetModel {
         let tokens = timings.map {
             Sentences.Token(text: $0.token, start: $0.startTime, end: $0.endTime)
         }
-        let text = await boosted(result.text, timings: timings, samples: samples)
+        let text = boosts ? await boosted(result.text, timings: timings, samples: samples) : result.text
         return (text.trimmingCharacters(in: .whitespacesAndNewlines), tokens)
     }
 
@@ -131,16 +146,69 @@ actor ParakeetModel {
         }
         return output.text
     }
+
+    private func takeTurn() async {
+        guard isBusy else {
+            isBusy = true
+            return
+        }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+
+    private func endTurn() {
+        if waiting.isEmpty {
+            isBusy = false
+        } else {
+            waiting.removeFirst().resume()
+        }
+    }
+}
+
+private final class BufferStore: @unchecked Sendable {
+    private let buffers = OSAllocatedUnfairLock(uncheckedState: [AVAudioPCMBuffer]())
+
+    func append(_ buffer: AVAudioPCMBuffer) {
+        buffers.withLock { $0.append(buffer) }
+    }
+
+    var all: [AVAudioPCMBuffer] { buffers.withLock { $0 } }
 }
 
 struct ParakeetEngine: SpeechEngine {
-    func transcribe(audio: AsyncStream<AudioChunk>) async throws -> String {
-        var buffers: [AVAudioPCMBuffer] = []
-        for await chunk in audio { buffers.append(chunk.buffer) }
+    func transcribe(audio: AsyncStream<AudioChunk>, onPartial: PartialHandler?) async throws -> String {
+        let store = BufferStore()
+        let preview = onPartial.map { onPartial in
+            Task.detached(priority: .userInitiated) { await Self.runPreviews(of: { store.all }, onPartial: onPartial) }
+        }
+        for await chunk in audio { store.append(chunk.buffer) }
+        preview?.cancel()
         try Task.checkCancellation()
-        let samples = try Self.samples(of: buffers)
+        let samples = try Self.samples(of: store.all)
         guard samples.count > 1600 else { return "" }
         return try await ParakeetModel.shared.transcribe(samples)
+    }
+
+    static func runPreviews(of buffers: @Sendable () -> [AVAudioPCMBuffer], onPartial: PartialHandler) async {
+        let converter = AudioConverter()
+        var lastCount = 0
+        while !Task.isCancelled {
+            try? await Task.sleep(for: LiveText.previewInterval)
+            let buffers = buffers()
+            guard buffers.count != lastCount, let format = buffers.first?.format else { continue }
+            lastCount = buffers.count
+            let (start, clipped) = LiveText.tailStart(
+                frameCounts: buffers.map { Int($0.frameLength) },
+                sampleRate: format.sampleRate,
+                window: LiveText.previewWindow
+            )
+            guard let joined = join(Array(buffers[start...])),
+                  let samples = try? converter.resampleBuffer(joined),
+                  Double(samples.count) >= LiveText.minimumAudio * 16000,
+                  let text = await ParakeetModel.shared.preview(samples),
+                  !Task.isCancelled
+            else { continue }
+            onPartial(LiveText.trimmed(text, clipped: clipped))
+        }
     }
 
     static func samples(of buffers: [AVAudioPCMBuffer]) throws -> [Float] {

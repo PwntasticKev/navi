@@ -7,6 +7,8 @@ import os
 public final class DictationFeature {
     private static let enabledKey = "dictation.enabled"
     private static let keepReadyKey = "dictation.keepMicrophoneReady"
+    private static let tapTogglesKey = "dictation.tapToToggle"
+    private static let liveTextKey = "dictation.liveText"
     private static let learnWordsKey = "dictation.learnWords"
     private static let learnDelay: Duration = .seconds(5)
     nonisolated private static let logger = Logger(subsystem: "com.donovanhiland.navi", category: "Dictation")
@@ -40,6 +42,19 @@ public final class DictationFeature {
             UserDefaults.standard.set(newValue, forKey: Self.keepReadyKey)
             updateMicrophone()
         }
+    }
+
+    public var tapToggles: Bool {
+        get { UserDefaults.standard.object(forKey: Self.tapTogglesKey) as? Bool ?? false }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Self.tapTogglesKey)
+            monitor?.tapToggles = newValue
+        }
+    }
+
+    public var showsLiveText: Bool {
+        get { UserDefaults.standard.object(forKey: Self.liveTextKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: Self.liveTextKey) }
     }
 
     public var learnsWords: Bool {
@@ -149,6 +164,7 @@ public final class DictationFeature {
         if monitor == nil {
             monitor = FnKeyMonitor { [weak self] action in self?.handle(action) }
         }
+        monitor?.tapToggles = tapToggles
         monitor?.start()
     }
 
@@ -168,7 +184,7 @@ public final class DictationFeature {
     }
 
     private struct Session {
-        let id = UUID()
+        let id: UUID
         let transcription: Task<String, any Error>
         let pressedAt: ContinuousClock.Instant
         let sourceApp: String?
@@ -193,16 +209,25 @@ public final class DictationFeature {
         startLevelTimer()
         TextCleaner.prewarm()
 
+        let id = UUID()
         let (stream, continuation) = AsyncStream<AudioChunk>.makeStream()
+        var onPartial: PartialHandler?
+        if showsLiveText {
+            onPartial = { [weak self] text in
+                Task { @MainActor in self?.showLiveText(text, for: id) }
+            }
+        }
         let transcription = Task.detached { () -> String in
             let engine = await SpeechEngines.best()
-            if engine is ParakeetEngine { return try await LiveDictation().transcribe(audio: stream) }
-            let raw = try await engine.transcribe(audio: stream)
+            if engine is ParakeetEngine {
+                return try await LiveDictation(onPartial: onPartial).transcribe(audio: stream)
+            }
+            let raw = try await engine.transcribe(audio: stream, onPartial: onPartial)
             return await TextCleaner().clean(raw)
         }
         let app = NSWorkspace.shared.frontmostApplication
         let session = Session(
-            transcription: transcription, pressedAt: .now,
+            id: id, transcription: transcription, pressedAt: .now,
             sourceApp: app?.localizedName, sourceBundleID: app?.bundleIdentifier
         )
         self.session = session
@@ -233,6 +258,11 @@ public final class DictationFeature {
                 Self.logger.info("Microphone ready \((ContinuousClock.now - session.pressedAt).milliseconds) ms after the press")
             }
         }
+    }
+
+    private func showLiveText(_ text: String, for id: UUID) {
+        guard session?.id == id else { return }
+        pill.model.liveText = text
     }
 
     private func lock() {

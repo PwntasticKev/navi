@@ -211,6 +211,18 @@ final class SettingsPanel: NSObject, NSWindowDelegate {
                 isEnabled: isOn
             ),
             .init(
+                id: "tapToggles", title: "Tap fn to Start and Stop",
+                detail: "One tap locks; the next press types",
+                get: { dictation.tapToggles }, set: { dictation.tapToggles = $0 },
+                isEnabled: isOn
+            ),
+            .init(
+                id: "showsLiveText", title: "Show Words While Talking",
+                detail: "Live words in the pill",
+                get: { dictation.showsLiveText }, set: { dictation.showsLiveText = $0 },
+                isEnabled: isOn
+            ),
+            .init(
                 id: "learnsWords", title: "Learn Words from Clipboard",
                 detail: "Names and terms you copy help Parakeet hear them",
                 get: { dictation.learnsWords }, set: { dictation.learnsWords = $0 },
