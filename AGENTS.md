@@ -93,7 +93,9 @@ Desktop Icons). Not checked yet: the `⌥⇧⌘N` menu and a second display.
   lists, spoken punctuation, filler words rules keep, repeats, long sentences
   with no commas). Timings log under the `Dictation` category ("Release to
   text: … ms", "Live: …"). fn with another key (fn+⌫,
-  fn+arrows) never dictates. The first launch asks before it uses fn. When on,
+  fn+arrows) never dictates. Esc cancels at any point (holding, locked, or
+  while the text is being made): nothing is typed, pasted, or added to the history.
+  The first launch asks before it uses fn. When on,
   Navi borrows the fn key setting (`AppleFnUsageType` = 0, "Do Nothing", applied
   with `activateSettings -u`) while it runs and puts it back on quit.
 - `Packages/NaviRecording`: record bar, `SCStream` → MP4 (H.264/AAC), mic and

@@ -103,6 +103,19 @@ public struct FnGesture: Equatable, Sendable {
         }
     }
 
+    public mutating func escapePressed() -> [Action] {
+        switch phase {
+        case .idle, .ignoringUntilUp:
+            return []
+        case .holding, .lockedHeld, .endingLock:
+            phase = .ignoringUntilUp
+            return [.cancel]
+        case .tapped, .locked:
+            phase = .idle
+            return [.cancel]
+        }
+    }
+
     public mutating func tick(at time: TimeInterval) -> Action? {
         guard case let .tapped(at) = phase, time - at >= doubleTapWindow else { return nil }
         phase = .idle
