@@ -196,9 +196,12 @@ public final class CaptureFeature {
                 previousApp: previousApp, copies: copies, session: session
             )
         }
-        Task { [weak session] in
+        let hidesIcons = settings.hideDesktopIcons
+        Task { [weak self, weak session] in
             let windows = await listing.value
-            session?.updateWindows(windows)
+            guard let session else { return }
+            session.updateWindows(windows)
+            if fastFreeze, hidesIcons, ScreenGrabber.missesFinderWindows(windows) { self?.freezeSlowly(session) }
         }
         session.purpose = purpose
         session.timer = timer
@@ -222,6 +225,7 @@ public final class CaptureFeature {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self, session == nil else { return }
             cards.prepare()
+            ScreenGrabber.refreshContent()
             guard settings.editAfterCapture, let screen = NSScreen.underMouse ?? NSScreen.main else { return }
             if editorStage?.screen != screen { editorStage = InPlaceAnnotator.Stage(screen: screen) }
         }
