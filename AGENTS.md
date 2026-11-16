@@ -124,9 +124,20 @@ Desktop Icons). Not checked yet: the `⌥⇧⌘N` menu and a second display.
   text: … ms", "Live: …"). fn with another key (fn+⌫,
   fn+arrows) never dictates. Esc cancels at any point (holding, locked, or
   while the text is being made): nothing is typed, pasted, or added to the history.
-  The first launch asks before it uses fn. When on,
+  The first launch asks before it uses fn. When on and the Talk Key is fn,
   Navi borrows the fn key setting (`AppleFnUsageType` = 0, "Do Nothing", applied
-  with `activateSettings -u`) while it runs and puts it back on quit.
+  with `activateSettings -u`) while it runs and puts it back on quit, or when
+  the Talk Key changes to another key.
+  Talk Key (Settings, "Change…"; `DictationTrigger`, stored as
+  `dictation.trigger`): fn (default), the right ⌘, ⌥ or ⌃ key on its own
+  (read from the device bits in `flagsChanged`, so the left key keeps working
+  for shortcuts), or any shortcut (a Carbon hot key with press and release,
+  such as ⌃⌥Space, or an F key on its own). Hold, double-tap to lock, and
+  "Tap … to Start and Stop" work the same for every key. The recorder
+  (`TalkKeyRecorder`) takes a lone press and release of a modifier, a
+  shortcut, or a pick from the list; it pauses Navi's hot keys and the Talk
+  Key while it is open. A shortcut can not clash with Navi's other shortcuts
+  or the History shortcut.
 - `Packages/NaviRecording`: record bar, `SCStream` → MP4 (H.264/AAC), mic and
   computer audio (mixed to one track), camera bubble, click and key overlays,
   hide icons (starts from the Hide Desktop Icons setting), mute notifications,
@@ -372,7 +383,7 @@ Xnapper's backgrounds, and macshot's auto-redact.
 | `Packages/NaviCore` | `Inbox` (shared history store), `CaptureItem`, `HotKey` (Carbon global hotkeys) |
 | `Packages/NaviClipboard` | Pasteboard watcher, Maccy-style panel, paste |
 | `Packages/NaviRecording` | Screen recording engine, record bar, camera bubble, overlays, GIF, trim |
-| `Packages/NaviDictation` | Talk to type: fn key, speech, cleanup, pill, paste |
+| `Packages/NaviDictation` | Talk to type: Talk Key (fn by default), speech, cleanup, pill, paste |
 | `Packages/NaviCapture` | Selection overlay and all-in-one bar, ScreenCaptureKit capture, corner cards, `Annotate/`, `Extras/` (pin, OCR, toast), `Scroll/`, `Background/` |
 | `docs/capture-plan.html` | Prototype, feature map, and plan |
 | `docs/upstream-hex.md` | Hex as the upstream for talk to type: feature map, sync steps |
@@ -402,7 +413,7 @@ cd Packages/NaviCapture && swift test   # capture, markup, stitch, background te
 NAVI_SNAPSHOTS=/tmp/navi-snaps swift test --filter EditorSnapshot  # in NaviCapture: draws the markup editor to PNGs (760/1000/1400 wide, dark and light) and edit after capture (1440 × 900; NAVI_BACKDROP=<png> for a real screen behind it) to check their look
 NAVI_TOOLTIP_FRAMES=/tmp/navi-tips swift test --filter TooltipDemo  # in NaviCapture: records the toolbar tooltips as 30 fps PNG frames, for a video
 cd Packages/NaviRecording && swift test # recording math, GIF, audio mixdown
-cd Packages/NaviDictation && swift test # cleanup rules, fn gestures, fn setting, scoring
+cd Packages/NaviDictation && swift test # cleanup rules, fn gestures, Talk Key, fn setting, scoring
 cd Packages/NaviDictation && swift run dictation-bench [--audio [--speech apple,parakeet]] [--failures] [--save]
 cd Packages/NaviDictation && swift run -c release dictation-bench --latency [--failures]  # release-to-text time for 3 s to 60 s dictations, live and not
 cd Packages/NaviPad && swift test       # iPhone pad state, store, cleanup diff

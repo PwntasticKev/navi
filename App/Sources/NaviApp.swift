@@ -40,7 +40,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var settingsPanel = SettingsPanel(app: self)
     private lazy var shortcutRecorder = HistoryShortcutRecorder(
         apply: { [weak self] in self?.setHistoryShortcut($0) ?? .refused },
-        onClose: { [weak self] in self?.resumeHotKeys() }
+        onClose: { [weak self] in self?.resumeAfterRecorder() }
+    )
+    private lazy var talkKeyRecorder = TalkKeyRecorder(
+        apply: { [weak self] in self?.setTalkKey($0) ?? .refused },
+        onClose: { [weak self] in self?.resumeAfterRecorder() }
     )
     private var signalSources: [any DispatchSourceSignal] = []
     private let logger = Logger(subsystem: "com.donovanhiland.navi", category: "App")
@@ -56,7 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dictation.onProblem = { CaptureFeature.showMessage($0) }
         if dictation.hasChosen {
             dictation.start()
-            if dictation.isEnabled { dictation.borrowFnKey() } else { dictation.giveBackFnKey() }
+            syncFnKey()
         }
         switch capture.settings.useNaviScreenshotKeys {
         case true?: setUseNaviScreenshotKeys(true)
@@ -86,7 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.messageText = "Use fn for Talk to Type?"
         alert.informativeText = """
             Hold fn, talk, and let go: Navi types what you said. While Navi runs, a tap on fn does nothing \
-            else (no emoji picker). Navi puts the fn key back when it quits. You can change this in the Navi menu.
+            else (no emoji picker). Navi puts the fn key back when it quits. You can pick another key in Settings.
             """
         alert.addButton(withTitle: "Use fn")
         alert.addButton(withTitle: "Not Now")
@@ -98,13 +102,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func setTalkToType(_ on: Bool) {
         dictation.isEnabled = on
-        if on {
-            dictation.borrowFnKey()
-            Task { _ = await DictationFeature.requestPermissions() }
-        } else {
-            dictation.giveBackFnKey()
-        }
+        syncFnKey()
+        if on { Task { _ = await DictationFeature.requestPermissions() } }
         updatePasteLastHotKey()
+    }
+
+    private func syncFnKey() {
+        if dictation.needsFnKey { dictation.borrowFnKey() } else { dictation.giveBackFnKey() }
+    }
+
+    func changeTalkKey() {
+        suspendForRecorder()
+        dictation.borrowFnKey()
+        talkKeyRecorder.show(current: dictation.trigger, hint: talkKeyHint)
+    }
+
+    private var talkKeyHint: String {
+        dictation.tapToggles ? "Tap to start, press again to type." : "Hold to talk. Double-tap to lock."
+    }
+
+    private func suspendForRecorder() {
+        suspendHotKeys()
+        dictation.suspendTrigger()
+    }
+
+    private func resumeAfterRecorder() {
+        resumeHotKeys()
+        syncFnKey()
+        dictation.resumeTrigger()
+    }
+
+    func setTalkKey(_ trigger: DictationTrigger) -> TalkKeyChange {
+        if let combo = trigger.shortcut {
+            let reserved = NaviHotKeys.reserved.merging(["History": historyShortcut]) { first, _ in first }
+            if let error = combo.validate(reserved: reserved, allowsBareFunctionKeys: true) { return .invalid(error) }
+            guard let probe = register("Talk to Type", combo, action: {}) else { return .refused }
+            probe.unregister()
+        }
+        dictation.setTrigger(trigger)
+        return .applied
     }
 
     private func updatePasteLastHotKey() {
@@ -189,12 +225,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func changeHistoryShortcut() {
-        suspendHotKeys()
+        suspendForRecorder()
         shortcutRecorder.show(current: historyShortcut)
     }
 
     func setHistoryShortcut(_ combo: KeyCombo) -> HistoryShortcutChange {
-        if let error = combo.validate(reserved: NaviHotKeys.reserved) { return .invalid(error) }
+        var reserved = NaviHotKeys.reserved
+        if let talkKey = dictation.trigger.shortcut { reserved["Talk to Type"] = talkKey }
+        if let error = combo.validate(reserved: reserved) { return .invalid(error) }
         let wasRegistered = historyHotKey != nil
         historyHotKey?.unregister()
         historyHotKey = nil

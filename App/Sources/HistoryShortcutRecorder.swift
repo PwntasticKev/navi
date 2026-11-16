@@ -28,11 +28,11 @@ final class RecorderState {
     var shakes = 0
 }
 
-private let modifierSymbols: [(bit: UInt32, symbol: String)] = [
+let modifierSymbols: [(bit: UInt32, symbol: String)] = [
     (UInt32(controlKey), "⌃"), (UInt32(optionKey), "⌥"), (UInt32(shiftKey), "⇧"), (UInt32(cmdKey), "⌘"),
 ]
 
-private struct Keycap: View {
+struct Keycap: View {
     let text: String?
     var tint: Color?
 
@@ -103,7 +103,7 @@ private struct ShortcutField: View {
     }
 }
 
-private struct Shake: ViewModifier {
+struct Shake: ViewModifier {
     let trigger: Int
     let enabled: Bool
 
@@ -172,9 +172,38 @@ private struct RecorderView: View {
     }
 }
 
-private final class RecorderPanel: NSPanel {
+final class RecorderPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    static func make(hosting: NSView) -> RecorderPanel {
+        let size = hosting.fittingSize
+        let container = NaviPanelBackground.make(cornerRadius: 12)
+        container.frame = CGRect(origin: .zero, size: size)
+        hosting.frame = container.bounds
+        hosting.autoresizingMask = [.width, .height]
+        container.addSubview(hosting)
+
+        let panel = RecorderPanel(
+            contentRect: CGRect(origin: .zero, size: size),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: true
+        )
+        panel.contentView = container
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.level = .popUpMenu
+        panel.isReleasedWhenClosed = false
+        let mouse = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
+        if let frame = screen?.visibleFrame {
+            panel.setFrameOrigin(CGPoint(x: frame.midX - size.width / 2, y: frame.midY - size.height / 2))
+        }
+        return panel
+    }
 }
 
 @MainActor
@@ -206,32 +235,8 @@ final class HistoryShortcutRecorder: NSObject, NSWindowDelegate {
             onReset: { [weak self] in self?.attempt(.defaultHistory) },
             onCancel: { [weak self] in self?.finish() }
         ))
-        let size = hosting.fittingSize
-        let container = NaviPanelBackground.make(cornerRadius: 12)
-        container.frame = CGRect(origin: .zero, size: size)
-        hosting.frame = container.bounds
-        hosting.autoresizingMask = [.width, .height]
-        container.addSubview(hosting)
-
-        let panel = RecorderPanel(
-            contentRect: CGRect(origin: .zero, size: size),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: true
-        )
-        panel.contentView = container
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.hidesOnDeactivate = false
-        panel.level = .popUpMenu
-        panel.isReleasedWhenClosed = false
+        let panel = RecorderPanel.make(hosting: hosting)
         panel.delegate = self
-        let mouse = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
-        if let frame = screen?.visibleFrame {
-            panel.setFrameOrigin(CGPoint(x: frame.midX - size.width / 2, y: frame.midY - size.height / 2))
-        }
         self.panel = panel
         panel.makeKeyAndOrderFront(nil)
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in

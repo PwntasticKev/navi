@@ -43,6 +43,7 @@ final class SettingsPanel: NSObject, NSWindowDelegate {
     }
 
     func show(at anchor: CGPoint) {
+        model.talkToType = talkToTypeToggles()
         model.refresh()
         let panel = panel
         generation += 1
@@ -160,6 +161,11 @@ final class SettingsPanel: NSObject, NSWindowDelegate {
         model.talkToType = talkToTypeToggles()
         model.vocabulary = app.dictation.vocabulary
         model.permissions = permissions()
+        model.talkKey = { [app] in app.dictation.trigger.name }
+        model.changeTalkKey = { [weak self, app] in
+            self?.close()
+            app.changeTalkKey()
+        }
         model.historyShortcut = { [app] in app.historyShortcut.display }
         model.changeHistoryShortcut = { [weak self, app] in
             self?.close()
@@ -199,9 +205,10 @@ final class SettingsPanel: NSObject, NSWindowDelegate {
     private func talkToTypeToggles() -> [SettingsModel.Toggle] {
         let dictation = app.dictation
         let isOn: @MainActor () -> Bool = { dictation.isEnabled }
+        let key = dictation.trigger.name
         return [
             .init(
-                id: "talkToType", title: "Hold fn to Talk",
+                id: "talkToType", title: "Hold \(key) to Talk",
                 get: isOn, set: { [app] in app.setTalkToType($0) }
             ),
             .init(
@@ -211,7 +218,7 @@ final class SettingsPanel: NSObject, NSWindowDelegate {
                 isEnabled: isOn
             ),
             .init(
-                id: "tapToggles", title: "Tap fn to Start and Stop",
+                id: "tapToggles", title: "Tap \(key) to Start and Stop",
                 detail: "One tap locks; the next press types",
                 get: { dictation.tapToggles }, set: { dictation.tapToggles = $0 },
                 isEnabled: isOn
