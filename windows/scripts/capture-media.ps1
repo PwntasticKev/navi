@@ -33,7 +33,6 @@ function Shot([string]$name) {
     $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
     $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
-    [System.Windows.Forms.Cursor]::Current.Draw($graphics, (New-Object System.Drawing.Rectangle ([System.Windows.Forms.Cursor]::Position.X), ([System.Windows.Forms.Cursor]::Position.Y), 32, 32))
     $bitmap.Save((Join-Path $Out "$name.png"), [System.Drawing.Imaging.ImageFormat]::Png)
     $graphics.Dispose()
     $bitmap.Dispose()
@@ -66,6 +65,8 @@ function ClickRow([string]$name, [int]$offset = 0) {
     [NaviInput]::Click()
 }
 
+(New-Object -ComObject Shell.Application).MinimizeAll()
+Start-Sleep -Seconds 1
 $recording = $null
 $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
 if ($ffmpeg) {
@@ -81,10 +82,7 @@ try {
     [NaviInput]::Chord([byte[]](0x11, 0x12, 0x10, 0x4E))
     Find 'Quit Navi' | Out-Null
     Shot 'menu'
-    $timer = Find 'Self-Timer'
-    Glide ([int]($timer.X + $timer.Width / 2)) ([int]($timer.Y + $timer.Height / 2))
-    Shot 'menu-self-timer'
-    ClickRow 'Settings…'
+    ClickRow "Settings$([char]0x2026)"
     Find 'Talk to Type' | Out-Null
     Shot 'settings'
     ClickRow 'Edit Screenshots Before Copying'
