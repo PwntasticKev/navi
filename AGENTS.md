@@ -528,8 +528,9 @@ feature map (Mac way and Windows way for every feature), the key map, steps W0 t
 and decisions D1 to D10. All ten recommendations were approved on 2026-11-16.
 
 Status: **W0 in progress.** `Navi.Core` (history, settings, key map, menu model) is
-built and tested. The tray app (`windows/App`) builds but has not been run on Windows
-yet. No Windows test machine is set up yet.
+built and tested. The tray app (`windows/App`) runs on a GitHub Windows runner: the
+`Ctrl+Alt+Shift+N` menu, Settings, and its toggles work there. No Windows test machine
+is set up yet.
 
 - **Stack (D1):** C# on .NET 10 with WPF, UI written in code (no XAML), Win32 through
   `LibraryImport` for now. Windows 11 22H2 and later, x64 and ARM64 (D9).
@@ -560,6 +561,12 @@ yet. No Windows test machine is set up yet.
 - **Testing (D10):** `Navi.Core` and future `*.Logic` projects target plain `net10.0`
   and run on this Mac. The UI needs a Windows 11 ARM VM in Parallels (not installed
   yet) reached over SSH. CI: `.github/workflows/windows.yml` on `windows-latest`.
+- **Screenshots and video without a VM:** `.github/workflows/windows-media.yml` builds
+  Release on `windows-latest` and runs `windows/scripts/capture-media.ps1`. The script
+  drives the real app with real key presses and clicks (rows found through UI
+  Automation), saves PNGs, and records the screen with ffmpeg. The run's
+  `windows-media` artifact holds them. Run it from the Actions tab, or push to a
+  `media/**` branch.
 
 ## Rules
 
