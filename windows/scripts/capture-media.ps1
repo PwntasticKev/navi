@@ -65,12 +65,25 @@ function ClickRow([string]$name, [int]$offset = 0) {
     [NaviInput]::Click()
 }
 
+function CloseDialog([string]$title) {
+    $condition = New-Object System.Windows.Automation.PropertyCondition ([System.Windows.Automation.AutomationElement]::NameProperty), $title
+    $window = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
+    if (-not $window) { return }
+    $window.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close()
+}
+
+CloseDialog 'System Properties'
 (New-Object -ComObject Shell.Application).MinimizeAll()
 Start-Sleep -Seconds 1
 $recording = $null
 $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
 if ($ffmpeg) {
-    $recording = Start-Process $ffmpeg.Source -ArgumentList '-y', '-loglevel', 'error', '-f', 'gdigrab', '-framerate', '30', '-draw_mouse', '1', '-i', 'desktop', '-pix_fmt', 'yuv420p', (Join-Path $Out 'navi-windows.mkv') -PassThru -NoNewWindow
+    $info = New-Object System.Diagnostics.ProcessStartInfo $ffmpeg.Source
+    $info.Arguments = "-y -loglevel error -f gdigrab -framerate 30 -draw_mouse 1 -i desktop -c:v libx264 -preset veryfast -pix_fmt yuv420p `"$(Join-Path $Out 'navi-windows.mp4')`""
+    $info.UseShellExecute = $false
+    $info.RedirectStandardInput = $true
+    $recording = [System.Diagnostics.Process]::Start($info)
+    Start-Sleep -Seconds 2
 }
 
 $app = Start-Process $exe -PassThru
@@ -102,8 +115,9 @@ try {
 finally {
     if ($recording) {
         Start-Sleep -Seconds 1
-        Stop-Process -Id $recording.Id
-        Start-Sleep -Seconds 2
+        $recording.StandardInput.Write('q')
+        $recording.StandardInput.Close()
+        if (-not $recording.WaitForExit(15000)) { Stop-Process -Id $recording.Id -Force }
     }
     if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force }
 }
