@@ -120,7 +120,8 @@ final class DictationPill {
 
     func show() {
         model.reset()
-        let panel = self.panel ?? makePanel()
+        self.panel?.orderOut(nil)
+        let panel = makePanel()
         self.panel = panel
         position(panel)
         panel.alphaValue = 0
