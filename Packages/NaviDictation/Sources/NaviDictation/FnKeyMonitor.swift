@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import NaviCore
 
 @MainActor
 final class FnKeyMonitor {
@@ -20,7 +21,9 @@ final class FnKeyMonitor {
         self.onIdleEscape = onIdleEscape
     }
 
-    var isRunning: Bool { globalMonitor != nil }
+    private(set) var isRunning = false
+    private var shortcutHotKey: HotKey?
+    private static var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
     var isLocked: Bool { gesture.isLocked }
 
     var tapToggles: Bool {
@@ -28,31 +31,45 @@ final class FnKeyMonitor {
         set { gesture.tapToggles = newValue }
     }
 
-    func start() {
-        guard globalMonitor == nil else { return }
-        let others: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            let fnDown = event.modifierFlags.contains(.function)
-            let othersHeld = !event.modifierFlags.intersection(others).isEmpty
-            let time = event.timestamp
-            MainActor.assumeIsolated { self?.flagsChanged(fnDown: fnDown, othersHeld: othersHeld, at: time) }
+    var trigger: DictationTrigger = .standard
+
+    @discardableResult
+    func start() -> Bool {
+        guard !isRunning else { return true }
+        isRunning = true
+        if let combo = trigger.shortcut {
+            shortcutHotKey = HotKey(
+                keyCode: combo.keyCode, modifiers: combo.modifiers,
+                action: { [weak self] in self?.triggerChanged(down: true, othersHeld: false, at: Self.now) },
+                onRelease: { [weak self] in self?.triggerChanged(down: false, othersHeld: false, at: Self.now) }
+            )
+        } else {
+            globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+                let flags = event.modifierFlags.rawValue
+                let time = event.timestamp
+                MainActor.assumeIsolated { self?.flagsChanged(flags: flags, at: time) }
+            }
+            localMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+                let flags = event.modifierFlags.rawValue
+                let time = event.timestamp
+                MainActor.assumeIsolated { self?.flagsChanged(flags: flags, at: time) }
+                return event
+            }
         }
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            let fnDown = event.modifierFlags.contains(.function)
-            let othersHeld = !event.modifierFlags.intersection(others).isEmpty
-            let time = event.timestamp
-            MainActor.assumeIsolated { self?.flagsChanged(fnDown: fnDown, othersHeld: othersHeld, at: time) }
-            return event
+        if trigger.shortcut != nil, shortcutHotKey == nil {
+            stop()
+            return false
         }
         globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            let keyCode = event.keyCode
-            MainActor.assumeIsolated { self?.keyPressed(keyCode: keyCode) }
+            let combo = KeyCombo.from(keyCode: event.keyCode, cocoaFlags: event.modifierFlags)
+            MainActor.assumeIsolated { self?.keyPressed(combo) }
         }
         localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            let keyCode = event.keyCode
-            MainActor.assumeIsolated { self?.keyPressed(keyCode: keyCode) }
+            let combo = KeyCombo.from(keyCode: event.keyCode, cocoaFlags: event.modifierFlags)
+            MainActor.assumeIsolated { self?.keyPressed(combo) }
             return event
         }
+        return true
     }
 
     func stop() {
@@ -60,6 +77,9 @@ final class FnKeyMonitor {
         if let localMonitor { NSEvent.removeMonitor(localMonitor) }
         if let globalKeyMonitor { NSEvent.removeMonitor(globalKeyMonitor) }
         if let localKeyMonitor { NSEvent.removeMonitor(localKeyMonitor) }
+        shortcutHotKey?.unregister()
+        shortcutHotKey = nil
+        isRunning = false
         globalMonitor = nil
         localMonitor = nil
         globalKeyMonitor = nil
@@ -75,11 +95,12 @@ final class FnKeyMonitor {
         gesture.reset()
     }
 
-    private func keyPressed(keyCode: UInt16) {
-        if keyCode == UInt16(kVK_Escape) {
+    private func keyPressed(_ combo: KeyCombo) {
+        if combo.keyCode == UInt32(kVK_Escape) {
             escapePressed()
             return
         }
+        if combo == trigger.shortcut { return }
         let actions = gesture.keyPressed()
         guard !actions.isEmpty else { return }
         scheduleTick()
@@ -96,8 +117,13 @@ final class FnKeyMonitor {
         for action in actions { onAction(action) }
     }
 
-    private func flagsChanged(fnDown: Bool, othersHeld: Bool, at time: TimeInterval) {
-        let actions = gesture.handle(fnDown: fnDown, othersHeld: othersHeld, at: time)
+    private func flagsChanged(flags: UInt, at time: TimeInterval) {
+        guard let state = trigger.state(flags: flags) else { return }
+        triggerChanged(down: state.down, othersHeld: state.othersHeld, at: time)
+    }
+
+    private func triggerChanged(down: Bool, othersHeld: Bool, at time: TimeInterval) {
+        let actions = gesture.handle(fnDown: down, othersHeld: othersHeld, at: time)
         scheduleTick()
         for action in actions { onAction(action) }
     }

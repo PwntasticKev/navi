@@ -24,6 +24,8 @@ final class SettingsModel {
     var talkToType: [Toggle] = []
     var vocabulary: VocabularyStore?
     var permissions: [Permission] = []
+    var talkKey: @MainActor () -> String = { "" }
+    var changeTalkKey: @MainActor () -> Void = {}
     var historyShortcut: @MainActor () -> String = { "" }
     var changeHistoryShortcut: @MainActor () -> Void = {}
     var clearHistory: @MainActor () -> Void = {}
@@ -72,7 +74,10 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             section("Capture") { toggles(model.capture) }
             separator
-            section("Talk to Type") { toggles(model.talkToType) }
+            section("Talk to Type") {
+                talkKeyRow
+                toggles(model.talkToType)
+            }
             separator
             if let vocabulary = model.vocabulary {
                 section("Vocabulary") { VocabularyRows(store: vocabulary) }
@@ -112,6 +117,20 @@ struct SettingsView: View {
         ForEach(toggles) { toggle in
             ToggleRow(toggle: toggle, isOn: model.binding(toggle), isEnabled: model.isEnabled(toggle))
         }
+    }
+
+    private var talkKeyRow: some View {
+        MenuRow {
+            Text("Talk Key")
+            Spacer()
+            KeyHint(text: currentTalkKey)
+            Button("Change…", action: model.changeTalkKey).controlSize(.mini)
+        }
+    }
+
+    private var currentTalkKey: String {
+        _ = model.revision
+        return model.talkKey()
     }
 
     @ViewBuilder private var historyRows: some View {

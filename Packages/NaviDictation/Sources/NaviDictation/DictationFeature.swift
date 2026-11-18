@@ -14,6 +14,8 @@ public final class DictationFeature {
     nonisolated private static let logger = Logger(subsystem: "com.donovanhiland.navi", category: "Dictation")
 
     private let inbox: Inbox
+    private let triggerStore = DictationTriggerStore(defaults: .standard)
+    private var isSuspended = false
     private let pill = DictationPill()
     private let microphone = Microphone()
     private var monitor: FnKeyMonitor?
@@ -32,7 +34,7 @@ public final class DictationFeature {
         get { UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? true }
         set {
             UserDefaults.standard.set(newValue, forKey: Self.enabledKey)
-            if isStarted { newValue ? attachMonitor() : detachMonitor() }
+            if isStarted, !isSuspended { newValue ? attachMonitor() : detachMonitor() }
             updateMicrophone()
         }
     }
@@ -51,6 +53,30 @@ public final class DictationFeature {
             UserDefaults.standard.set(newValue, forKey: Self.tapTogglesKey)
             monitor?.tapToggles = newValue
         }
+    }
+
+    public private(set) lazy var trigger: DictationTrigger = triggerStore.load()
+
+    public func setTrigger(_ newValue: DictationTrigger) {
+        guard newValue != trigger else { return }
+        trigger = newValue
+        triggerStore.save(newValue)
+        Self.logger.info("Talk to Type key is now \(newValue.name, privacy: .public)")
+        guard monitor != nil else { return }
+        detachMonitor()
+        attachMonitor()
+    }
+
+    public var needsFnKey: Bool { isEnabled && trigger.usesFnKey }
+
+    public func suspendTrigger() {
+        isSuspended = true
+        detachMonitor()
+    }
+
+    public func resumeTrigger() {
+        isSuspended = false
+        if isStarted, isEnabled { attachMonitor() }
     }
 
     public var showsLiveText: Bool {
@@ -162,14 +188,20 @@ public final class DictationFeature {
     public static func requestPermissions() async -> Bool { await DictationPermissions.requestAll() }
 
     private func attachMonitor() {
+        guard !isSuspended else { return }
         if monitor == nil {
             monitor = FnKeyMonitor(
                 onAction: { [weak self] action in self?.handle(action) },
                 onIdleEscape: { [weak self] in self?.cancelProcessing() }
             )
         }
+        let trigger = trigger
         monitor?.tapToggles = tapToggles
-        monitor?.start()
+        monitor?.trigger = trigger
+        if monitor?.start() == false {
+            Self.logger.error("Could not register \(trigger.name, privacy: .public) for Talk to Type")
+            onProblem?("Navi could not use \(trigger.name) for Talk to Type. Another app may own it.")
+        }
     }
 
     private func detachMonitor() {

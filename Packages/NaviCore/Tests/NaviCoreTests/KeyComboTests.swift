@@ -44,6 +44,19 @@ struct KeyComboTests {
         #expect(KeyCombo(keyCode: v, modifiers: UInt32(controlKey)).validate(reserved: [:]) == nil)
     }
 
+    @Test func bareFunctionKeysPassOnlyWhenAllowed() {
+        let f13 = KeyCombo(keyCode: UInt32(kVK_F13), modifiers: 0)
+        #expect(f13.validate(reserved: [:]) == .needsModifier)
+        #expect(f13.validate(reserved: [:], allowsBareFunctionKeys: true) == nil)
+        #expect(KeyCombo(keyCode: UInt32(kVK_F5), modifiers: UInt32(shiftKey)).validate(
+            reserved: [:], allowsBareFunctionKeys: true) == nil)
+        #expect(KeyCombo(keyCode: v, modifiers: 0).validate(reserved: [:], allowsBareFunctionKeys: true) == .needsModifier)
+        #expect(f13.validate(reserved: ["Record": f13], allowsBareFunctionKeys: true) == .inUse("Record"))
+        #expect(KeyCombo(keyCode: UInt32(kVK_F11), modifiers: 0).validate(
+            reserved: [:], allowsBareFunctionKeys: true) == .needsModifier)
+        #expect(KeyCombo(keyCode: UInt32(kVK_F11), modifiers: UInt32(controlKey)).validate(reserved: [:]) == nil)
+    }
+
     @Test func comboUsedByAnotherActionIsInUse() {
         let reserved = ["Capture Area": KeyCombo(keyCode: UInt32(kVK_ANSI_4), modifiers: commandShift)]
         let clash = KeyCombo(keyCode: UInt32(kVK_ANSI_4), modifiers: commandShift)

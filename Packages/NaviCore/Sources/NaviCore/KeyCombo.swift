@@ -43,13 +43,26 @@ public struct KeyCombo: Codable, Equatable, Hashable, Sendable {
         return text + keyName
     }
 
-    public func validate(reserved: [String: KeyCombo]) -> KeyComboError? {
-        if modifiers & UInt32(cmdKey | controlKey | optionKey) == 0 {
+    public var isBareFunctionKey: Bool {
+        modifiers & UInt32(cmdKey | controlKey | optionKey) == 0 && Self.functionKeys.contains(keyCode)
+            && !Self.systemFunctionKeys.contains(keyCode)
+    }
+
+    public func validate(reserved: [String: KeyCombo], allowsBareFunctionKeys: Bool = false) -> KeyComboError? {
+        if modifiers & UInt32(cmdKey | controlKey | optionKey) == 0, !(allowsBareFunctionKeys && isBareFunctionKey) {
             return modifiers & UInt32(shiftKey) != 0 ? .shiftOnly : .needsModifier
         }
         let clash = reserved.sorted { $0.key < $1.key }.first { $0.value == self }
         return clash.map { .inUse($0.key) }
     }
+
+    private static let functionKeys: Set<UInt32> = [
+        kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8, kVK_F9, kVK_F10,
+        kVK_F11, kVK_F12, kVK_F13, kVK_F14, kVK_F15, kVK_F16, kVK_F17, kVK_F18, kVK_F19, kVK_F20,
+    ].reduce(into: []) { $0.insert(UInt32($1)) }
+
+    private static let systemFunctionKeys: Set<UInt32> = [kVK_F3, kVK_F4, kVK_F11, kVK_F12]
+        .reduce(into: []) { $0.insert(UInt32($1)) }
 
     private static let keyNames: [UInt32: String] = [
         UInt32(kVK_ANSI_A): "A", UInt32(kVK_ANSI_B): "B", UInt32(kVK_ANSI_C): "C", UInt32(kVK_ANSI_D): "D",
