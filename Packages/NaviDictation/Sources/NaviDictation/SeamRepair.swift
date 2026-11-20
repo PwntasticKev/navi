@@ -4,6 +4,7 @@ enum SeamRepair {
     static let shortestPhrase = 2
     static let longestPhrase = 6
     private static let closers: Set<Character> = ["\"", "'", "”", "’", ")", "]", "}", "»"]
+    private static let openers: Set<Character> = ["\"", "“", "‘", "(", "[", "{", "«"]
     private static let stops: Set<Character> = [",", ".", ";", ":", "!", "?", "…"]
     private static let numberWords: Set<String> = [
         "zero", "oh", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
@@ -40,7 +41,8 @@ enum SeamRepair {
     }
 
     private static func looksLikeSeam(_ words: [String], at index: Int, length: Int, phrase: [String]) -> Bool {
-        guard Set(phrase).count > 1, !isPeriodic(phrase), !phrase.allSatisfy(isNumber) else { return false }
+        guard Set(phrase).count > 1, !isPeriodic(phrase), !phrase.contains(where: isNumber) else { return false }
+        guard !words[index ..< index + 2 * length].contains(where: hasQuoteOrBracket) else { return false }
         guard !endsClause(words[index + length - 1]) else { return false }
         if index > 0, normalized(words[index - 1]) == phrase[length - 1] { return false }
         let after = index + 2 * length
@@ -51,6 +53,11 @@ enum SeamRepair {
         (1 ..< phrase.count).contains { unit in
             phrase.count % unit == 0 && phrase.indices.allSatisfy { phrase[$0] == phrase[$0 % unit] }
         }
+    }
+
+    private static func hasQuoteOrBracket(_ word: String) -> Bool {
+        (word.first.map(openers.contains) ?? false)
+            || trailingMarks(of: word).contains { closers.contains($0) && $0 != "'" && $0 != "’" }
     }
 
     private static func isNumber(_ word: String) -> Bool {

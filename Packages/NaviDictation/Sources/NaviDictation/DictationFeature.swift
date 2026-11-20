@@ -228,8 +228,8 @@ public final class DictationFeature {
     private func detachMonitor() {
         monitor?.stop()
         monitor = nil
-        cancelSession()
         cancelProcessing(reason: "Talk to Type turned off")
+        cancelSession()
     }
 
     private func handle(_ action: FnGesture.Action) {

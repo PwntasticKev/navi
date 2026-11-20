@@ -32,6 +32,13 @@ struct SeamRepairTests {
         #expect(SeamRepair.collapsingRepeats("I said \"no way.\" No way can we ship today.") == "I said \"no way.\" No way can we ship today.")
     }
 
+    @Test("quotes, brackets and numbers inside a repeat leave it alone")
+    func quotesAndNumbers() {
+        #expect(SeamRepair.collapsingRepeats("He said \"no way\" no way") == "He said \"no way\" no way")
+        #expect(SeamRepair.collapsingRepeats("(we ship) we ship today") == "(we ship) we ship today")
+        #expect(SeamRepair.collapsingRepeats("one hundred and one hundred and five") == "one hundred and one hundred and five")
+    }
+
     @Test("the removed copy's punctuation stays")
     func punctuationKept() {
         #expect(SeamRepair.collapsingRepeats("it's fine it's fine, really") == "it's fine, really")
