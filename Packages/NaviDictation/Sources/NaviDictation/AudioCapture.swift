@@ -47,6 +47,8 @@ struct PreRollBuffer<Chunk> {
 }
 
 final class Microphone: @unchecked Sendable {
+    typealias Sink = AsyncStream<AudioChunk>.Continuation
+
     static let preRoll: Double = 0.45
     static let quietToEnd: Duration = .milliseconds(200)
     static let quietToEndWhileTalking: Duration = .milliseconds(300)
@@ -58,8 +60,7 @@ final class Microphone: @unchecked Sendable {
         var running = false
         var unit: AudioUnit?
         var format: AVAudioFormat?
-        var sink: AsyncStream<AudioChunk>.Continuation?
-        var preRoll = PreRollBuffer<AVAudioPCMBuffer>(capacity: 0)
+        var router = CaptureRouter<AVAudioPCMBuffer, Sink>(preRollCapacity: 0)
         var level: Float = 0
         var bands: [Float] = Array(repeating: 0, count: SpectrumBands.count)
         var lastSound: ContinuousClock.Instant?
@@ -72,6 +73,7 @@ final class Microphone: @unchecked Sendable {
     private static let logger = Logger(subsystem: "com.donovanhiland.navi", category: "Microphone")
     private let listenerQueue = DispatchQueue(label: "com.donovanhiland.navi.microphone")
     private var defaultInputListener: AudioObjectPropertyListenerBlock?
+    private let lostHandler = OSAllocatedUnfairLock<(@Sendable ([UUID]) -> Void)?>(initialState: nil)
 
     private static let defaultInputAddress = AudioObjectPropertyAddress(
         mSelector: kAudioHardwarePropertyDefaultInputDevice,
@@ -81,20 +83,34 @@ final class Microphone: @unchecked Sendable {
 
     init() {
         let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            guard let self else { return }
-            let (wasRunning, wasPrepared) = state.withLockUnchecked { ($0.running, $0.unit != nil) }
-            guard wasPrepared else { return }
-            Self.logger.info("Default input changed; setting up the microphone again")
-            close()
-            do {
-                if wasRunning { try open() } else { try prepare() }
-            } catch {
-                Self.logger.error("Could not set up the new input: \(error.localizedDescription)")
-            }
+            self?.restartAfterInputChange()
         }
         defaultInputListener = listener
         var address = Self.defaultInputAddress
         AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, listenerQueue, listener)
+    }
+
+    func onCaptureLost(_ handler: @escaping @Sendable ([UUID]) -> Void) {
+        lostHandler.withLock { $0 = handler }
+    }
+
+    private func restartAfterInputChange() {
+        setup.lock()
+        defer { setup.unlock() }
+        let (wasRunning, wasPrepared, capturing) = state.withLockUnchecked { ($0.running, $0.unit != nil, $0.router.ids) }
+        guard wasPrepared else { return }
+        Self.logger.info("Default input changed; setting up the microphone again")
+        close(keepingCapture: true)
+        do {
+            if wasRunning { try open() } else { try prepare() }
+            if wasRunning { return }
+        } catch {
+            Self.logger.error("Could not set up the new input: \(error.localizedDescription)")
+        }
+        let (ids, sinks) = state.withLockUnchecked { ($0.router.ids, $0.router.endAll()) }
+        let lost = Array(Set(capturing + ids))
+        if !lost.isEmpty { lostHandler.withLock { $0 }?(lost) }
+        sinks.forEach { $0.finish() }
     }
 
     deinit {
@@ -121,7 +137,7 @@ final class Microphone: @unchecked Sendable {
         state.withLockUnchecked {
             $0.unit = unit
             $0.format = format
-            $0.preRoll = PreRollBuffer(capacity: Int(format.sampleRate * Self.preRoll))
+            $0.router.preRoll = PreRollBuffer(capacity: Int(format.sampleRate * Self.preRoll))
         }
     }
 
@@ -130,32 +146,41 @@ final class Microphone: @unchecked Sendable {
         defer { setup.unlock() }
         guard !isRunning else { return }
         try prepare()
-        guard let unit = state.withLockUnchecked({ $0.unit }) else { throw DictationError.noMicrophone }
+        guard let unit = state.withLockUnchecked({ state -> AudioUnit? in
+            _ = state.router.preRoll.drain()
+            return state.unit
+        }) else { throw DictationError.noMicrophone }
         try Self.check(AudioOutputUnitStart(unit), "start the input")
         state.withLock { $0.running = true }
     }
 
     func pause() {
+        pause(keepingCapture: false)
+    }
+
+    private func pause(keepingCapture: Bool) {
         setup.lock()
         defer { setup.unlock() }
-        let (wasRunning, unit, sink) = state.withLockUnchecked { state in
-            defer {
-                state.running = false
-                state.sink = nil
-                state.level = 0
-                state.bands = Array(repeating: 0, count: SpectrumBands.count)
-                _ = state.preRoll.drain()
-            }
-            return (state.running, state.unit, state.sink)
+        let (wasRunning, unit, sinks) = state.withLockUnchecked { state in
+            let result = (state.running, state.unit, keepingCapture ? [] : state.router.endAll())
+            state.running = false
+            state.level = 0
+            state.bands = Array(repeating: 0, count: SpectrumBands.count)
+            _ = state.router.preRoll.drain()
+            return result
         }
-        sink?.finish()
+        sinks.forEach { $0.finish() }
         if wasRunning, let unit { AudioOutputUnitStop(unit) }
     }
 
     func close() {
+        close(keepingCapture: false)
+    }
+
+    private func close(keepingCapture: Bool) {
         setup.lock()
         defer { setup.unlock() }
-        pause()
+        pause(keepingCapture: keepingCapture)
         let unit = state.withLockUnchecked { state -> AudioUnit? in
             defer {
                 state.unit = nil
@@ -168,14 +193,13 @@ final class Microphone: @unchecked Sendable {
         AudioComponentInstanceDispose(unit)
     }
 
-    func beginCapture(into sink: AsyncStream<AudioChunk>.Continuation, includePreRoll: Bool) {
-        let kept = state.withLockUnchecked { state -> [AVAudioPCMBuffer] in
-            state.sink = sink
-            state.gate = SoundGate()
-            let kept = state.preRoll.drain()
-            return includePreRoll ? kept : []
+    func beginCapture(id: UUID, into sink: Sink, includePreRoll: Bool) {
+        state.withLockUnchecked { state in
+            if !state.router.isCapturing { state.gate = SoundGate() }
+            for (sink, buffer) in state.router.begin(id: id, sink: sink, includePreRoll: includePreRoll) {
+                sink.yield(AudioChunk(buffer: buffer))
+            }
         }
-        for buffer in kept { sink.yield(AudioChunk(buffer: buffer)) }
     }
 
     func waitForReleaseTail(releasedAt released: ContinuousClock.Instant) async {
@@ -195,11 +219,8 @@ final class Microphone: @unchecked Sendable {
         return sinceSound >= (talkingAtRelease ? quietToEndWhileTalking : quietToEnd)
     }
 
-    func endCapture() {
-        let sink = state.withLock { state -> AsyncStream<AudioChunk>.Continuation? in
-            defer { state.sink = nil }
-            return state.sink
-        }
+    func endCapture(id: UUID) {
+        let sink = state.withLockUnchecked { $0.router.end(id: id) }
         sink?.finish()
     }
 
@@ -288,14 +309,14 @@ final class Microphone: @unchecked Sendable {
         let level = Self.loudness(decibels: decibels)
         let bands = Self.bands(of: buffer, using: spectrum)
         let now = ContinuousClock.now
-        let sink = state.withLockUnchecked { state -> AsyncStream<AudioChunk>.Continuation? in
+        state.withLockUnchecked { state in
             state.level = level
             state.bands = bands
             if state.gate.isSound(decibels: decibels) { state.lastSound = now }
-            if state.sink == nil { state.preRoll.append(buffer, frames: Int(buffer.frameLength)) }
-            return state.sink
+            for (sink, buffer) in state.router.receive(buffer, frames: Int(buffer.frameLength)) {
+                sink.yield(AudioChunk(buffer: buffer))
+            }
         }
-        sink?.yield(AudioChunk(buffer: buffer))
     }
 
     private static func bands(of buffer: AVAudioPCMBuffer, using spectrum: SpectrumAnalyzer) -> [Float] {
