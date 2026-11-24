@@ -557,6 +557,16 @@ to Xcode. That account needs the Admin or App Manager role, and App Store
 Connect needs an app for `com.donovanhiland.navi.ios`. The build number
 defaults to the time (`yyyyMMddHHmm`); the version is `MARKETING_VERSION` in
 `iOS/project.yml`.
+`iOS/AppStore/testflight.md` holds the TestFlight text (description, what to
+test, review notes, privacy answers); `docs/privacy.md` is the privacy policy.
+
+Debug iPhone builds launched with `-NaviDemo YES` play a scripted dictation
+(`DemoScript`) through the real keyboard and app link, with no speech model
+needed: the mic session turns on at launch and the pad shows live words, the
+cleanup, and the typed text. Release builds leave it out (`#if DEBUG`). The App
+Store screenshots (1320 × 2868) and app preview (886 × 1920) in
+`iOS/AppStore/` come from Simulator captures of that mode
+(`scripts/appstore-media.sh <captures-folder>`; the script lists the files).
 
 Test locally with `scripts/dev.sh`. It quits Navi, builds, and runs Navi Dev
 (they share shortcuts, so one runs at a time). `scripts/dev.sh fresh` wipes
